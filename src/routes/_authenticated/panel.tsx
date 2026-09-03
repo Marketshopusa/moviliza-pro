@@ -29,6 +29,7 @@ type Row = {
   vehicle_model: string | null;
   origin: SiteCode;
   destination: SiteCode;
+  dropoff_location: string | null;
   occurred_at: string;
 };
 
@@ -36,9 +37,12 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+type NoteRow = { id: string; driver_id: string; body: string; created_at: string };
+
 function PanelPage() {
   const { isSupervisor, loading } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
+  const [notes, setNotes] = useState<NoteRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
@@ -51,18 +55,28 @@ function PanelPage() {
     void (async () => {
       const start = new Date(`${from}T00:00:00`).toISOString();
       const end = new Date(`${to}T23:59:59`).toISOString();
-      const [{ data: m }, { data: p }] = await Promise.all([
+      const [{ data: m }, { data: p }, { data: n }] = await Promise.all([
         supabase
           .from("movements")
-          .select("id, movement_number, driver_id, plate_state, plate, vehicle_model, origin, destination, occurred_at")
+          .select(
+            "id, movement_number, driver_id, plate_state, plate, vehicle_model, origin, destination, dropoff_location, occurred_at",
+          )
           .gte("occurred_at", start)
           .lte("occurred_at", end)
           .order("occurred_at", { ascending: false })
           .limit(1000),
         supabase.from("profiles").select("id, full_name, initials"),
+        supabase
+          .from("driver_notes")
+          .select("id, driver_id, body, created_at")
+          .gte("created_at", start)
+          .lte("created_at", end)
+          .order("created_at", { ascending: false })
+          .limit(200),
       ]);
       if (!active) return;
       setRows((m as Row[]) ?? []);
+      setNotes((n as NoteRow[]) ?? []);
       const map: Record<string, string> = {};
       for (const row of (p as { id: string; full_name: string; initials: string }[]) ?? []) {
         map[row.id] = row.full_name || row.initials;
@@ -74,6 +88,7 @@ function PanelPage() {
       active = false;
     };
   }, [isSupervisor, from, to]);
+
 
   const stats = useMemo(() => {
     const byDriver = new Map<string, number>();
@@ -92,7 +107,7 @@ function PanelPage() {
   }, [rows]);
 
   function exportCsv() {
-    const header = ["numero", "fecha", "conductor", "estado", "placa", "modelo", "origen", "destino"];
+    const header = ["numero", "fecha", "conductor", "estado", "placa", "modelo", "origen", "destino", "ubicacion"];
     const lines = rows.map((r) =>
       [
         r.movement_number,
@@ -103,6 +118,7 @@ function PanelPage() {
         r.vehicle_model ?? "",
         r.origin,
         r.destination,
+        r.dropoff_location ?? "",
       ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(","),
@@ -190,6 +206,7 @@ function PanelPage() {
               </p>
               <p className="text-[10px] text-muted-foreground">
                 {names[m.driver_id] ?? "Conductor"} • {new Date(m.occurred_at).toLocaleString("es-US")}
+                {m.dropoff_location ? ` • ${m.dropoff_location}` : ""}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -200,6 +217,24 @@ function PanelPage() {
           </div>
         ))}
       </section>
+
+      <section className="space-y-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          Notas privadas de conductores
+        </h2>
+        {notes.map((n) => (
+          <div key={n.id} className="bg-card p-3 rounded-lg border border-border space-y-1">
+            <p className="text-[10px] font-bold uppercase text-muted-foreground">
+              {names[n.driver_id] ?? "Conductor"} • {new Date(n.created_at).toLocaleString("es-US")}
+            </p>
+            <p className="text-xs whitespace-pre-wrap">{n.body}</p>
+          </div>
+        ))}
+        {notes.length === 0 && !busy && (
+          <p className="text-xs text-muted-foreground">Sin notas en el rango seleccionado.</p>
+        )}
+      </section>
+
     </>
   );
 }

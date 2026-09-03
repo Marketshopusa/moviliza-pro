@@ -2,6 +2,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type SiteCode = "X" | "A" | "B" | "C";
 
+export type PhotoEntry = { path: string; note: string };
+
 export type PendingMovement = {
   localId: string;
   driver_id: string;
@@ -11,12 +13,14 @@ export type PendingMovement = {
   vehicle_model: string | null;
   origin: SiteCode;
   destination: SiteCode;
+  dropoff_location: string | null;
   occurred_at: string;
   latitude: number | null;
   longitude: number | null;
   notes: string | null;
-  photoDataUrl: string | null;
+  photos: { dataUrl: string; note: string }[];
 };
+
 
 const KEY = "movpro.pending.v1";
 
@@ -64,9 +68,10 @@ export async function syncPending(): Promise<number> {
   let synced = 0;
   for (const item of items) {
     try {
-      const photoPath = item.photoDataUrl
-        ? await uploadPhoto(item.driver_id, dataUrlToBlob(item.photoDataUrl))
-        : null;
+      const photos: PhotoEntry[] = [];
+      for (const p of item.photos ?? []) {
+        photos.push({ path: await uploadPhoto(item.driver_id, dataUrlToBlob(p.dataUrl)), note: p.note });
+      }
       const { error } = await supabase.from("movements").insert({
         driver_id: item.driver_id,
         shift_id: item.shift_id,
@@ -75,11 +80,13 @@ export async function syncPending(): Promise<number> {
         vehicle_model: item.vehicle_model,
         origin: item.origin,
         destination: item.destination,
+        dropoff_location: item.dropoff_location,
         occurred_at: item.occurred_at,
         latitude: item.latitude,
         longitude: item.longitude,
         notes: item.notes,
-        photo_path: photoPath,
+        photos,
+        photo_path: photos[0]?.path ?? null,
         status: "sincronizado",
       });
       if (error) throw error;
