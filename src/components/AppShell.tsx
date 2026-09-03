@@ -101,6 +101,32 @@ export function AppShell({ children }: { children?: ReactNode }) {
   );
 }
 
+function RoleBadge({ className }: { className?: string }) {
+  const { role, isSupervisor } = useAuth();
+  const label: Record<AppRole, string> = {
+    conductor: "DRIVER",
+    supervisor: "SUPERVISOR",
+    administrador: "ADMINISTRADOR",
+  };
+  const badgeClasses: Record<AppRole, string> = {
+    conductor: "text-green-600 border-green-500/40 bg-green-500/10",
+    supervisor: "text-primary border-primary/40",
+    administrador: "text-primary border-primary/40",
+  };
+  const classes = cn(
+    "inline-block text-[10px] font-bold uppercase tracking-widest border rounded px-2 py-1",
+    badgeClasses[role],
+    className
+  );
+  return isSupervisor ? (
+    <Link to="/panel" className={classes}>
+      {label[role]}
+    </Link>
+  ) : (
+    <span className={classes}>{label[role]}</span>
+  );
+}
+
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
     <Link
