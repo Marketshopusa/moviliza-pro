@@ -131,15 +131,12 @@ export function PushToTalk() {
 
   // Cualquier toque en la pantalla habilita la reproducción de audio entrante.
   useEffect(() => {
-    const handler = () => {
-      void unlockAudio();
-      live.resumeAudio();
-    };
+    const handler = () => void unlockAudio();
     window.addEventListener("pointerdown", handler, { once: false });
     return () => {
       window.removeEventListener("pointerdown", handler);
     };
-  }, [unlockAudio, live]);
+  }, [unlockAudio]);
 
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
@@ -152,6 +149,13 @@ export function PushToTalk() {
     userId: user?.id ?? null,
     displayName: profile?.initials || profile?.full_name || "Conductor",
   });
+
+  const resumeLive = live.resumeAudio;
+  useEffect(() => {
+    const handler = () => resumeLive();
+    window.addEventListener("pointerdown", handler);
+    return () => window.removeEventListener("pointerdown", handler);
+  }, [resumeLive]);
 
   const load = useCallback(async () => {
     if (!user) return;
