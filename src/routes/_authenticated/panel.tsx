@@ -100,10 +100,11 @@ function PanelPage() {
         supabase
           .from("driver_notes")
           .select("id, driver_id, body, created_at")
-          .gte("created_at", start)
+          .gte("created_at", new Date(new Date(start).getTime() - 30 * 86400_000).toISOString())
           .lte("created_at", end)
           .order("created_at", { ascending: false })
           .limit(200),
+
       ]);
       if (!active) return;
       setRows((m as Row[]) ?? []);
