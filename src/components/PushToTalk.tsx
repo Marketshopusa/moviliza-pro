@@ -204,50 +204,50 @@ export function PushToTalk() {
   const visibleChannels = channels.filter((c) => !c.is_admin_only || isSupervisor);
 
   return (
-    <div className="flex items-start gap-3">
-      <button
-        type="button"
-        aria-label="Mantén presionado para hablar"
-        disabled={!isMember}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          setPressed(true);
-          void startTalk();
-        }}
-        onPointerUp={() => {
-          setPressed(false);
-          stopTalk();
-        }}
-        onPointerLeave={() => {
-          setPressed(false);
-          stopTalk();
-        }}
-        onPointerCancel={() => {
-          setPressed(false);
-          stopTalk();
-        }}
-        onContextMenu={(e) => e.preventDefault()}
-        className={`size-16 shrink-0 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
-          pressed || recording
-            ? "bg-ptt-live border-ptt-live/50 scale-110 shadow-[0_0_0_6px] shadow-ptt-live/25"
-            : isMember
-              ? "bg-ptt border-ptt/50 hover:brightness-105 active:scale-95"
-              : "bg-panel-foreground/20 border-panel-foreground/10"
-        }`}
-      >
-        <MicIcon className="size-7 text-white" />
-      </button>
+    <div className="flex items-center gap-3">
+      <div className="flex flex-col items-center gap-1 shrink-0">
+        <button
+          type="button"
+          aria-label="Mantén presionado para hablar"
+          disabled={!isMember}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            setPressed(true);
+            void startTalk();
+          }}
+          onPointerUp={() => {
+            setPressed(false);
+            stopTalk();
+          }}
+          onPointerLeave={() => {
+            setPressed(false);
+            stopTalk();
+          }}
+          onPointerCancel={() => {
+            setPressed(false);
+            stopTalk();
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+          className={`size-20 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
+            pressed || recording
+              ? "bg-ptt-live border-ptt-live/50 scale-110 shadow-[0_0_0_8px] shadow-ptt-live/25"
+              : `bg-ptt border-ptt/50 hover:brightness-105 active:scale-95 ${isMember ? "" : "opacity-60"}`
+          }`}
+        >
+          <MicIcon className="size-9 text-white" />
+        </button>
+        <p className="text-panel-foreground/60 text-[9px] font-bold uppercase tracking-widest">Walkie-talkie</p>
+      </div>
 
       <div className="min-w-0">
-        <p className="text-panel-foreground/50 text-[10px] font-medium uppercase tracking-wider">Walkie-talkie</p>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="text-sm font-bold truncate text-left underline decoration-dotted underline-offset-4"
+          className="text-xs font-bold truncate text-left underline decoration-dotted underline-offset-4"
         >
           {channel ? channel.name : "Elegir canal"}
         </button>
-        <p className="text-[10px] text-panel-foreground/60 mt-0.5">
+        <p className="text-[9px] text-panel-foreground/60 mt-0.5 leading-tight">
           {recording
             ? "Transmitiendo…"
             : speaking
