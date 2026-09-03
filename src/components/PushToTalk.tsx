@@ -7,7 +7,7 @@ type Channel = { id: string; name: string; is_admin_only: boolean };
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
 
 export function PushToTalk() {
-  const { user, isSupervisor, profile } = useAuth();
+  const { user, isSupervisor, isAdmin, profile } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
@@ -21,6 +21,8 @@ export function PushToTalk() {
   const [newName, setNewName] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newAdmin, setNewAdmin] = useState(false);
+  const [manageId, setManageId] = useState<string | null>(null);
+  const [managePass, setManagePass] = useState("");
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -84,8 +86,9 @@ export function PushToTalk() {
       if (!data?.signedUrl) return;
       let who = namesRef.current[senderId];
       if (!who) {
-        const { data: p } = await supabase.from("profiles").select("full_name, initials").eq("id", senderId).maybeSingle();
-        who = (p?.initials || p?.full_name || "Conductor") as string;
+        const { data: p } = await supabase.rpc("public_profiles", { _ids: [senderId] });
+        const row = (p as { full_name: string; initials: string }[] | null)?.[0];
+        who = (row?.initials || row?.full_name || "Conductor") as string;
         namesRef.current[senderId] = who;
       }
       queueRef.current.push({ url: data.signedUrl, who });
