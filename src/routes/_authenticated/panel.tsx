@@ -408,7 +408,127 @@ function PanelPage() {
         </div>
       </section>
 
+      {/* TURNOS (solo administradores) */}
+      {isAdmin && (
+        <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Turnos de trabajo ({workShifts.length})
+          </h2>
+
+          <div className="grid grid-cols-4 gap-2">
+            <input
+              placeholder="Nombre del turno"
+              value={newShift.name}
+              onChange={(e) => setNewShift({ ...newShift, name: e.target.value })}
+              className="col-span-2 bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+            />
+            <input
+              type="time"
+              aria-label="Hora de inicio"
+              value={newShift.start}
+              onChange={(e) => setNewShift({ ...newShift, start: e.target.value })}
+              className="bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+            />
+            <input
+              type="time"
+              aria-label="Hora de fin"
+              value={newShift.end}
+              onChange={(e) => setNewShift({ ...newShift, end: e.target.value })}
+              className="bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+            />
+            <button
+              onClick={async () => {
+                if (!newShift.name.trim()) return setShiftMsg("Escribe el nombre del turno");
+                const { error } = await supabase
+                  .from("work_shifts")
+                  .insert({ name: newShift.name.trim(), start_time: newShift.start, end_time: newShift.end });
+                setShiftMsg(error ? "No se pudo crear el turno" : "Turno creado");
+                if (!error) setNewShift({ name: "", start: "18:00", end: "02:30" });
+                void loadShifts();
+              }}
+              className="col-span-4 bg-primary text-primary-foreground font-bold py-2.5 rounded-lg uppercase text-[10px] tracking-widest"
+            >
+              Crear turno
+            </button>
+          </div>
+
+          {workShifts.map((w) => {
+            const list = assigns.filter((a) => a.shift_id === w.id);
+            return (
+              <div key={w.id} className="border border-border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold truncate">{w.name}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground">
+                      {w.start_time.slice(0, 5)} – {w.end_time.slice(0, 5)} · {list.length} drivers
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`¿Eliminar el turno ${w.name} y sus asignaciones?`)) return;
+                      const { error } = await supabase.from("work_shifts").delete().eq("id", w.id);
+                      setShiftMsg(error ? "No se pudo eliminar" : "Turno eliminado");
+                      void loadShifts();
+                    }}
+                    className="text-[10px] font-bold uppercase text-destructive shrink-0"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+
+                {list.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] truncate">
+                      {a.email}
+                      {a.user_id ? "" : " · pendiente de registro"}
+                    </p>
+                    <button
+                      onClick={async () => {
+                        await supabase.from("shift_assignments").delete().eq("id", a.id);
+                        void loadShifts();
+                      }}
+                      className="text-[10px] font-bold uppercase text-destructive shrink-0"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ))}
+
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    placeholder="correo@driver.com"
+                    aria-label={`Correo para ${w.name}`}
+                    value={newEmail[w.id] ?? ""}
+                    onChange={(e) => setNewEmail({ ...newEmail, [w.id]: e.target.value })}
+                    className="flex-1 bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+                  />
+                  <button
+                    onClick={async () => {
+                      const email = (newEmail[w.id] ?? "").trim().toLowerCase();
+                      if (!email) return;
+                      const match = users.find((u) => (u.email ?? "").toLowerCase() === email);
+                      const { error } = await supabase
+                        .from("shift_assignments")
+                        .upsert({ shift_id: w.id, email, user_id: match?.id ?? null }, { onConflict: "email" });
+                      setShiftMsg(error ? "No se pudo asignar el correo" : "Correo asignado");
+                      if (!error) setNewEmail({ ...newEmail, [w.id]: "" });
+                      void loadShifts();
+                    }}
+                    className="bg-panel text-panel-foreground font-bold px-3 rounded-lg uppercase text-[10px] tracking-widest"
+                  >
+                    Agregar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {shiftMsg && <p className="text-[10px] text-muted-foreground">{shiftMsg}</p>}
+        </section>
+      )}
+
       {/* TARJETA POR CONDUCTOR */}
+
       <section className="space-y-2">
         <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
           Conductores ({drivers.length})
