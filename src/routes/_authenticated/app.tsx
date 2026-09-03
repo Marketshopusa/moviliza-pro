@@ -189,6 +189,7 @@ function DriverHome() {
     };
   }, [plate, plateState]);
 
+  // Lectura desde una foto (respaldo si la cámara en vivo no está disponible).
   async function scanPlate(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (scanRef.current) scanRef.current.value = "";
@@ -210,6 +211,16 @@ function DriverHome() {
       setScanning(false);
     }
   }
+
+  const closeScanner = useCallback(() => setScannerOpen(false), []);
+  const handleScanned = useCallback((read: { plate: string; state: string | null }) => {
+    setPlate(read.plate);
+    if (read.state && STATES.includes(read.state)) setPlateState(read.state);
+    setScanMsg(
+      `Placa detectada: ${read.state ? `${read.state}-` : ""}${read.plate}. Verifica antes de guardar.`,
+    );
+  }, []);
+
 
   function resetForm() {
     setPlate("");
