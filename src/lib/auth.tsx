@@ -19,6 +19,7 @@ type AuthState = {
   role: AppRole;
   loading: boolean;
   isSupervisor: boolean;
+  isAdmin: boolean;
   refreshProfile: () => Promise<void>;
 };
 
@@ -29,6 +30,7 @@ const AuthContext = createContext<AuthState>({
   role: "conductor",
   loading: true,
   isSupervisor: false,
+  isAdmin: false,
   refreshProfile: async () => {},
 });
 
@@ -85,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role,
         loading,
         isSupervisor: role === "supervisor" || role === "administrador",
+        isAdmin: role === "administrador",
         refreshProfile: async () => {
           if (user) await loadProfile(user.id);
         },

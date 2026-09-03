@@ -7,7 +7,7 @@ type Channel = { id: string; name: string; is_admin_only: boolean };
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
 
 export function PushToTalk() {
-  const { user, isSupervisor, profile } = useAuth();
+  const { user, isSupervisor, isAdmin, profile } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [channelId, setChannelId] = useState<string | null>(null);
@@ -21,6 +21,8 @@ export function PushToTalk() {
   const [newName, setNewName] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newAdmin, setNewAdmin] = useState(false);
+  const [manageId, setManageId] = useState<string | null>(null);
+  const [managePass, setManagePass] = useState("");
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -84,8 +86,9 @@ export function PushToTalk() {
       if (!data?.signedUrl) return;
       let who = namesRef.current[senderId];
       if (!who) {
-        const { data: p } = await supabase.from("profiles").select("full_name, initials").eq("id", senderId).maybeSingle();
-        who = (p?.initials || p?.full_name || "Conductor") as string;
+        const { data: p } = await supabase.rpc("public_profiles", { _ids: [senderId] });
+        const row = (p as { full_name: string; initials: string }[] | null)?.[0];
+        who = (row?.initials || row?.full_name || "Conductor") as string;
         namesRef.current[senderId] = who;
       }
       queueRef.current.push({ url: data.signedUrl, who });
@@ -155,6 +158,38 @@ export function PushToTalk() {
     setStatus("Canal creado");
     void load();
   }
+
+  async function changePasscode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!manageId) return;
+    setStatus(null);
+    const { error } = await supabase.rpc("update_voice_channel_passcode", {
+      _channel_id: manageId,
+      _passcode: managePass.trim(),
+    });
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+    setManagePass("");
+    setManageId(null);
+    setStatus("Clave actualizada. Los demás deberán ingresarla de nuevo.");
+    void load();
+  }
+
+  async function removeChannel(id: string, name: string) {
+    if (!window.confirm(`¿Eliminar el canal "${name}"? Se borrarán sus audios.`)) return;
+    const { error } = await supabase.rpc("delete_voice_channel", { _channel_id: id });
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+    if (channelId === id) setChannelId(null);
+    setStatus("Canal eliminado");
+    void load();
+  }
+
+
 
   async function startTalk() {
     if (!user || !channelId || !isMember || recording) return;
@@ -281,34 +316,74 @@ export function PushToTalk() {
               {visibleChannels.map((c) => {
                 const joined = memberIds.includes(c.id);
                 return (
-                  <li key={c.id} className="border border-border rounded-xl p-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm truncate">{c.name}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {c.is_admin_only ? "Solo administración" : "Turno"} · {joined ? "Con acceso" : "Requiere clave"}
-                      </p>
+                  <li key={c.id} className="border border-border rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm truncate">{c.name}</p>
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {c.is_admin_only ? "Solo administración" : "Turno"} · {joined ? "Con acceso" : "Requiere clave"}
+                        </p>
+                      </div>
+                      {joined ? (
+                        <button
+                          onClick={() => {
+                            setChannelId(c.id);
+                            setOpen(false);
+                          }}
+                          className={`text-[10px] font-bold uppercase px-3 py-2 rounded ${
+                            channelId === c.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
+                          }`}
+                        >
+                          {channelId === c.id ? "Activo" : "Usar"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setPendingJoin(c)}
+                          className="text-[10px] font-bold uppercase px-3 py-2 rounded bg-accent text-panel"
+                        >
+                          Entrar
+                        </button>
+                      )}
                     </div>
-                    {joined ? (
-                      <button
-                        onClick={() => {
-                          setChannelId(c.id);
-                          setOpen(false);
-                        }}
-                        className={`text-[10px] font-bold uppercase px-3 py-2 rounded ${
-                          channelId === c.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
-                        }`}
-                      >
-                        {channelId === c.id ? "Activo" : "Usar"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setPendingJoin(c)}
-                        className="text-[10px] font-bold uppercase px-3 py-2 rounded bg-accent text-panel"
-                      >
-                        Entrar
-                      </button>
+                    {isAdmin && (
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => {
+                            setManageId(manageId === c.id ? null : c.id);
+                            setManagePass("");
+                          }}
+                          className="text-[10px] font-bold uppercase text-primary"
+                        >
+                          Cambiar clave
+                        </button>
+                        <button
+                          onClick={() => void removeChannel(c.id, c.name)}
+                          className="text-[10px] font-bold uppercase text-destructive"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    )}
+                    {isAdmin && manageId === c.id && (
+                      <form onSubmit={changePasscode} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={managePass}
+                          onChange={(e) => setManagePass(e.target.value)}
+                          placeholder="Nueva clave (mín. 4)"
+                          className="flex-1 border border-border rounded-lg px-3 py-2 text-sm bg-background"
+                        />
+                        <button
+                          type="submit"
+                          disabled={managePass.trim().length < 4}
+                          className="bg-primary text-primary-foreground rounded-lg px-3 text-[10px] font-bold uppercase disabled:opacity-40"
+                        >
+                          Guardar
+                        </button>
+                      </form>
                     )}
                   </li>
+
                 );
               })}
             </ul>
@@ -338,7 +413,7 @@ export function PushToTalk() {
               </form>
             )}
 
-            {isSupervisor && (
+            {isAdmin && (
               <form onSubmit={createChannel} className="border-t border-border pt-3 space-y-2">
                 <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Crear canal de turno</p>
                 <input

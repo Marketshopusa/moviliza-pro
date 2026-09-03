@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { freshnessLabel } from "@/lib/geo";
 import type { SiteCode } from "@/lib/offline";
+import { deleteUser, listUsers, setUserRole, type ManagedUser } from "@/lib/admin.functions";
 
 export const Route = createFileRoute("/_authenticated/panel")({
   head: () => ({
@@ -50,7 +52,12 @@ type LocRow = {
 };
 
 function PanelPage() {
-  const { isSupervisor, loading } = useAuth();
+  const { isSupervisor, isAdmin, loading, user } = useAuth();
+  const fetchUsers = useServerFn(listUsers);
+  const removeUser = useServerFn(deleteUser);
+  const changeRole = useServerFn(setUserRole);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [userMsg, setUserMsg] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -135,6 +142,19 @@ function PanelPage() {
     };
   }, [isSupervisor, from, to]);
 
+
+  const loadUsers = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      setUsers(await fetchUsers({ data: undefined as never }));
+    } catch {
+      setUserMsg("No se pudo cargar la lista de usuarios.");
+    }
+  }, [isAdmin, fetchUsers]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   const stats = useMemo(() => {
     const byDriver = new Map<string, number>();
@@ -224,6 +244,60 @@ function PanelPage() {
           Exportar CSV ({rows.length})
         </button>
       </div>
+
+      {isAdmin && (
+        <section className="space-y-2">
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Usuarios de la plataforma ({users.length})
+          </h2>
+          {users.map((u) => (
+            <div key={u.id} className="bg-card border border-border rounded-lg p-3 flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold truncate">{u.full_name || u.email || u.id}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{u.email}</p>
+              </div>
+              <select
+                value={u.role}
+                aria-label={`Rol de ${u.full_name || u.email}`}
+                onChange={async (e) => {
+                  const role = e.target.value as "conductor" | "supervisor" | "administrador";
+                  try {
+                    await changeRole({ data: { userId: u.id, role } });
+                    setUserMsg("Rol actualizado");
+                    void loadUsers();
+                  } catch {
+                    setUserMsg("No se pudo cambiar el rol");
+                  }
+                }}
+                className="bg-secondary border border-border rounded px-2 py-1 text-[10px] font-bold uppercase"
+              >
+                <option value="conductor">Driver</option>
+                <option value="supervisor">Supervisor</option>
+                <option value="administrador">Admin</option>
+              </select>
+              <button
+                disabled={u.id === user?.id}
+                onClick={async () => {
+                  if (!window.confirm(`¿Eliminar definitivamente la cuenta de ${u.full_name || u.email}?`)) return;
+                  try {
+                    await removeUser({ data: { userId: u.id } });
+                    setUserMsg("Cuenta eliminada");
+                    void loadUsers();
+                  } catch {
+                    setUserMsg("No se pudo eliminar la cuenta");
+                  }
+                }}
+                className="text-[10px] font-bold uppercase text-destructive disabled:opacity-30"
+              >
+                Eliminar
+              </button>
+            </div>
+          ))}
+          {userMsg && <p className="text-[10px] text-muted-foreground">{userMsg}</p>}
+        </section>
+      )}
+
+
 
       <section className="space-y-2">
         <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">

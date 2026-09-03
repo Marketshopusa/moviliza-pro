@@ -1,0 +1,12 @@
+REVOKE EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) FROM anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.is_supervisor(uuid) FROM anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.is_channel_member(uuid, uuid) FROM anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.join_voice_channel(uuid, text) FROM anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.create_voice_channel(text, text, boolean) FROM anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.update_voice_channel_passcode(uuid, text) FROM anon, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.delete_voice_channel(uuid) FROM anon, PUBLIC;
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_supervisor(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_channel_member(uuid, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.join_voice_channel(uuid, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_voice_channel(text, text, boolean) TO authenticated;

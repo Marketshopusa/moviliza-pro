@@ -371,6 +371,7 @@ export type Database = {
         Args: { _is_admin_only?: boolean; _name: string; _passcode: string }
         Returns: string
       }
+      delete_voice_channel: { Args: { _channel_id: string }; Returns: boolean }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -384,6 +385,19 @@ export type Database = {
       }
       is_supervisor: { Args: { _user_id: string }; Returns: boolean }
       join_voice_channel: {
+        Args: { _channel_id: string; _passcode: string }
+        Returns: boolean
+      }
+      public_profiles: {
+        Args: { _ids: string[] }
+        Returns: {
+          avatar_url: string
+          full_name: string
+          id: string
+          initials: string
+        }[]
+      }
+      update_voice_channel_passcode: {
         Args: { _channel_id: string; _passcode: string }
         Returns: boolean
       }
