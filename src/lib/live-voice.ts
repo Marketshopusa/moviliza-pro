@@ -55,6 +55,8 @@ export function useLiveVoice(options: {
   const rtRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const nameRef = useRef(displayName);
   nameRef.current = displayName;
+  const uidRef = useRef<string | null>(userId);
+  uidRef.current = userId;
 
   const setPeerCount = useCallback(() => {
     setState((s) => ({ ...s, peerCount: peersRef.current.size }));
@@ -251,7 +253,7 @@ export function useLiveVoice(options: {
     void rtRef.current?.send({
       type: "broadcast",
       event: "talk",
-      payload: { from: null, name: nameRef.current, on: true },
+      payload: { from: uidRef.current, name: nameRef.current, on: true },
     });
     return true;
   }, []);
@@ -263,7 +265,7 @@ export function useLiveVoice(options: {
     void rtRef.current?.send({
       type: "broadcast",
       event: "talk",
-      payload: { from: null, name: nameRef.current, on: false },
+      payload: { from: uidRef.current, name: nameRef.current, on: false },
     });
   }, []);
 
