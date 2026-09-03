@@ -491,11 +491,20 @@ function DriverHome() {
             <label className="text-[10px] font-bold text-muted-foreground uppercase">Marca / modelo</label>
             <input
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => {
+                setModel(e.target.value);
+                setModelFromRegistry(false);
+              }}
               placeholder="Toyota Corolla"
               className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
             />
+            {modelFromRegistry && (
+              <p className="text-[10px] font-bold uppercase tracking-widest text-success">
+                Modelo tomado del registro interno
+              </p>
+            )}
           </div>
+
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
