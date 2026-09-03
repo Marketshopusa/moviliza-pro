@@ -468,6 +468,25 @@ function DriverHome() {
             </div>
           </div>
 
+          <button
+            type="button"
+            onClick={() => scanRef.current?.click()}
+            disabled={scanning}
+            className="w-full bg-secondary border border-border rounded-lg py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground disabled:opacity-50"
+          >
+            {scanning ? "Leyendo placa…" : "Escanear placa con la cámara"}
+          </button>
+          <input
+            ref={scanRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={scanPlate}
+            className="hidden"
+          />
+          {scanMsg && <p className="text-[11px] text-muted-foreground">{scanMsg}</p>}
+
+
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-muted-foreground uppercase">Marca / modelo</label>
             <input
