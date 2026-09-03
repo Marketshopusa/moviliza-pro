@@ -237,16 +237,25 @@ function PanelPage() {
     notes.forEach((n) => ids.add(n.driver_id));
     locs.forEach((l) => ids.add(l.user_id));
     users.forEach((u) => ids.add(u.id));
-    return [...ids].map((id) => ({
-      id,
-      name: names[id] ?? users.find((u) => u.id === id)?.full_name ?? "Conductor",
-      account: users.find((u) => u.id === id) ?? null,
-      movements: rows.filter((r) => r.driver_id === id),
-      notes: notes.filter((n) => n.driver_id === id),
-      shifts: shifts.filter((s) => s.driver_id === id),
-      loc: locs.find((l) => l.user_id === id) ?? null,
-    }));
-  }, [rows, notes, locs, users, shifts, names]);
+    return [...ids].map((id) => {
+      const account = users.find((u) => u.id === id) ?? null;
+      const assign =
+        assigns.find((a) => a.user_id === id) ??
+        assigns.find((a) => account?.email && a.email.toLowerCase() === account.email.toLowerCase()) ??
+        null;
+      return {
+        id,
+        name: names[id] ?? account?.full_name ?? "Conductor",
+        account,
+        assignedShift: assign ? (workShifts.find((w) => w.id === assign.shift_id) ?? null) : null,
+        movements: rows.filter((r) => r.driver_id === id),
+        notes: notes.filter((n) => n.driver_id === id),
+        shifts: shifts.filter((s) => s.driver_id === id),
+        loc: locs.find((l) => l.user_id === id) ?? null,
+      };
+    });
+  }, [rows, notes, locs, users, shifts, names, assigns, workShifts]);
+
 
   function exportCsv() {
     const header = ["numero", "fecha", "turno", "conductor", "estado", "placa", "modelo", "origen", "destino", "ubicacion"];
