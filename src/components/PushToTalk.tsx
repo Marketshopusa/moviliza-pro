@@ -413,7 +413,7 @@ export function PushToTalk() {
               </form>
             )}
 
-            {isSupervisor && (
+            {isAdmin && (
               <form onSubmit={createChannel} className="border-t border-border pt-3 space-y-2">
                 <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Crear canal de turno</p>
                 <input
