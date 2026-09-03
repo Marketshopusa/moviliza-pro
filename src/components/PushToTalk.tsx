@@ -114,11 +114,17 @@ export function PushToTalk() {
     }
     playingRef.current = true;
     setSpeaking(next.who);
-    const audio = new Audio(next.url);
+    const audio = getAudioEl();
+    if (!audio) return;
     audio.onended = () => playNext();
     audio.onerror = () => playNext();
-    void audio.play().catch(() => playNext());
-  }, []);
+    audio.muted = false;
+    audio.src = next.url;
+    void audio.play().catch(() => {
+      setNeedsUnlock(true);
+      playNext();
+    });
+  }, [getAudioEl]);
 
   const enqueue = useCallback(
     async (path: string, senderId: string) => {
