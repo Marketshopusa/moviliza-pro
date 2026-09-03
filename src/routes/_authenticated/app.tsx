@@ -341,13 +341,9 @@ function DriverHome() {
   return (
     <>
       <div className="bg-panel rounded-xl p-5 text-panel-foreground shadow-lg">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <p className="text-panel-foreground/50 text-xs font-medium uppercase tracking-wider">
-              {shift ? "Turno activo" : "Sin turno"}
-            </p>
-            <p className="text-xl font-bold">{shift ? `Desde ${hhmm(shift.started_at)}` : "Inicia tu turno"}</p>
-          </div>
+        <div className="flex justify-between items-start mb-4 gap-3">
+          <PushToTalk />
+
           <div className="flex flex-col items-end gap-2">
             <span
               className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${online ? "bg-success/20 text-success border-success/30" : "bg-accent/20 text-accent border-accent/30"}`}
