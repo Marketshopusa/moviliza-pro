@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { queueMovement, readPending, syncPending, uploadPhoto, type PhotoEntry, type SiteCode } from "@/lib/offline";
+import { PushToTalk } from "@/components/PushToTalk";
+
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({
@@ -341,18 +343,17 @@ function DriverHome() {
   return (
     <>
       <div className="bg-panel rounded-xl p-5 text-panel-foreground shadow-lg">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <p className="text-panel-foreground/50 text-xs font-medium uppercase tracking-wider">
-              {shift ? "Turno activo" : "Sin turno"}
-            </p>
-            <p className="text-xl font-bold">{shift ? `Desde ${hhmm(shift.started_at)}` : "Inicia tu turno"}</p>
-          </div>
+        <div className="flex justify-between items-start mb-4 gap-3">
+          <PushToTalk />
+
           <div className="flex flex-col items-end gap-2">
             <span
               className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${online ? "bg-success/20 text-success border-success/30" : "bg-accent/20 text-accent border-accent/30"}`}
             >
               {online ? "En línea" : `Offline · ${pendingCount}`}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider text-panel-foreground/50">
+              {shift ? `Turno desde ${hhmm(shift.started_at)}` : "Sin turno"}
             </span>
             <button
               onClick={toggleShift}
@@ -360,6 +361,7 @@ function DriverHome() {
             >
               {shift ? "Cerrar turno" : "Iniciar turno"}
             </button>
+
           </div>
         </div>
         <div className="grid grid-cols-3 gap-4 border-t border-panel-foreground/10 pt-4">
