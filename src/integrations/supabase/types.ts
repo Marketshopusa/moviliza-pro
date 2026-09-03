@@ -388,6 +388,15 @@ export type Database = {
         Args: { _channel_id: string; _passcode: string }
         Returns: boolean
       }
+      public_profiles: {
+        Args: { _ids: string[] }
+        Returns: {
+          avatar_url: string
+          full_name: string
+          id: string
+          initials: string
+        }[]
+      }
       update_voice_channel_passcode: {
         Args: { _channel_id: string; _passcode: string }
         Returns: boolean
