@@ -26,6 +26,8 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
 
     async function start() {
       try {
+        // Carga el motor OCR en paralelo con la cámara para que esté listo antes.
+        const workerPromise = createPlateWorker();
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
           audio: false,
@@ -38,7 +40,7 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
         }
         setReady(true);
         setStatus("Enfoca la placa dentro del recuadro…");
-        worker = await createPlateWorker();
+        worker = await workerPromise;
         if (cancelled) return;
         void loop();
       } catch {
