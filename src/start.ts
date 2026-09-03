@@ -1,6 +1,7 @@
 import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
 
 import { renderErrorPage } from "./lib/error-page";
+import { attachAuth } from "./lib/auth-attach";
 
 const errorMiddleware = createMiddleware().server(async ({ next }) => {
   try {
