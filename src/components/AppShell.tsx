@@ -59,19 +59,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </Link>
           <div className="flex flex-col items-end gap-1.5">
             <div className="flex items-center gap-3">
-              {isSupervisor ? (
-                <Link
-                  to="/panel"
-                  className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-primary border border-primary/40 rounded px-2 py-1"
-                >
-                  {role}
-                </Link>
-              ) : (
-                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
-                  {role}
-                </span>
-              )}
-
+              <RoleBadge className="hidden sm:inline-block" />
               <Link to="/perfil" className="size-8 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-xs font-mono font-bold">
                 {avatar ? (
                   <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
@@ -86,18 +74,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 Salir
               </button>
             </div>
-            {isSupervisor ? (
-              <Link
-                to="/panel"
-                className="sm:hidden text-[10px] font-bold uppercase tracking-widest text-primary border border-primary/40 rounded px-2 py-1"
-              >
-                {role}
-              </Link>
-            ) : (
-              <span className="sm:hidden text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
-                {role}
-              </span>
-            )}
+            <RoleBadge className="sm:hidden" />
           </div>
         </div>
       </header>
