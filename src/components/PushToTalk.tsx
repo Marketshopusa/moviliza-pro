@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
 type Channel = { id: string; name: string; is_admin_only: boolean };
+type VoiceMessage = { id: string; audio_path: string; sender_id: string; created_at: string };
 
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
 const SILENCE =
@@ -36,6 +37,8 @@ export function PushToTalk() {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
   const blockedAudioRef = useRef<{ url: string; who: string } | null>(null);
+  const receivedIdsRef = useRef<Set<string>>(new Set());
+  const messageCursorRef = useRef<string>(new Date().toISOString());
 
   // Un único elemento de audio reutilizado: los navegadores móviles solo permiten
   // reproducir en un elemento que ya fue "desbloqueado" por un gesto del usuario.
@@ -58,6 +61,7 @@ export function PushToTalk() {
         await el.play();
         blockedAudioRef.current = null;
         unlockedRef.current = true;
+        setStatus(null);
         return;
       }
       if (unlockedRef.current) return;
@@ -146,7 +150,9 @@ export function PushToTalk() {
     audio.src = next.url;
     void audio.play().catch(() => {
       blockedAudioRef.current = next;
-      playingRef.current = false;
+      // Conserva el turno actual para no reemplazar ni perder este audio si
+      // llegan más transmisiones antes del siguiente gesto del usuario.
+      playingRef.current = true;
       setStatus("Audio pendiente · toca la pantalla para escucharlo");
     });
   }, [getAudioEl]);
@@ -168,24 +174,53 @@ export function PushToTalk() {
     [playNext],
   );
 
+  const receiveMessage = useCallback(
+    (row: VoiceMessage) => {
+      if (!user || row.sender_id === user.id || receivedIdsRef.current.has(row.id)) return;
+      receivedIdsRef.current.add(row.id);
+      if (row.created_at > messageCursorRef.current) messageCursorRef.current = row.created_at;
+      void enqueue(row.audio_path, row.sender_id);
+    },
+    [enqueue, user],
+  );
+
   useEffect(() => {
     if (!channelId || !isMember || !user) return;
+    receivedIdsRef.current.clear();
+    // Incluye unos segundos previos para cubrir el instante en que el teléfono
+    // cambia de red, vuelve del fondo o termina de conectar Realtime.
+    messageCursorRef.current = new Date(Date.now() - 5000).toISOString();
+
+    const syncMessages = async () => {
+      const { data, error } = await supabase
+        .from("voice_messages")
+        .select("id, audio_path, sender_id, created_at")
+        .eq("channel_id", channelId)
+        .gt("created_at", messageCursorRef.current)
+        .order("created_at", { ascending: true })
+        .limit(25);
+      if (error) return;
+      for (const row of (data ?? []) as VoiceMessage[]) receiveMessage(row);
+    };
+
     const sub = supabase
       .channel(`voice-${channelId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "voice_messages", filter: `channel_id=eq.${channelId}` },
         (payload) => {
-          const row = payload.new as { audio_path: string; sender_id: string };
-          if (row.sender_id === user.id) return;
-          void enqueue(row.audio_path, row.sender_id);
+          receiveMessage(payload.new as VoiceMessage);
         },
       )
-      .subscribe();
+      .subscribe((subscriptionStatus) => {
+        if (subscriptionStatus === "SUBSCRIBED") void syncMessages();
+      });
+    const poll = window.setInterval(() => void syncMessages(), 1500);
     return () => {
+      window.clearInterval(poll);
       void supabase.removeChannel(sub);
     };
-  }, [channelId, isMember, user, enqueue]);
+  }, [channelId, isMember, user, receiveMessage]);
 
   async function join(e: React.FormEvent) {
     e.preventDefault();
@@ -280,7 +315,8 @@ export function PushToTalk() {
           setStatus("Transmisión muy corta");
           return;
         }
-        const path = `${user.id}/${crypto.randomUUID()}.webm`;
+        const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+        const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
         const { error: upErr } = await supabase.storage.from("voice-clips").upload(path, blob, {
           contentType: blob.type,
           upsert: false,
