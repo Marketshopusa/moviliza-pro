@@ -211,21 +211,31 @@ export function PushToTalk() {
         disabled={!isMember}
         onPointerDown={(e) => {
           e.preventDefault();
+          setPressed(true);
           void startTalk();
         }}
-        onPointerUp={stopTalk}
-        onPointerLeave={stopTalk}
-        onPointerCancel={stopTalk}
+        onPointerUp={() => {
+          setPressed(false);
+          stopTalk();
+        }}
+        onPointerLeave={() => {
+          setPressed(false);
+          stopTalk();
+        }}
+        onPointerCancel={() => {
+          setPressed(false);
+          stopTalk();
+        }}
         onContextMenu={(e) => e.preventDefault()}
-        className={`size-16 shrink-0 rounded-full grid place-items-center select-none touch-none transition-transform border-4 ${
-          recording
-            ? "bg-accent border-accent/40 scale-110 animate-pulse"
+        className={`size-16 shrink-0 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
+          pressed || recording
+            ? "bg-ptt-live border-ptt-live/50 scale-110 shadow-[0_0_0_6px] shadow-ptt-live/25"
             : isMember
-              ? "bg-accent border-accent/30 active:scale-95"
+              ? "bg-ptt border-ptt/50 hover:brightness-105 active:scale-95"
               : "bg-panel-foreground/20 border-panel-foreground/10"
         }`}
       >
-        <MicIcon className="size-7 text-panel" />
+        <MicIcon className="size-7 text-white" />
       </button>
 
       <div className="min-w-0">
