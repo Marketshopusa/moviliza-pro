@@ -2,13 +2,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { queueMovement, readPending, syncPending, uploadPhoto, type SiteCode } from "@/lib/offline";
+import { queueMovement, readPending, syncPending, uploadPhoto, type PhotoEntry, type SiteCode } from "@/lib/offline";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({
     meta: [
       { title: "Nuevo movimiento · MovilizaPro" },
-      { name: "description", content: "Registra un movimiento con foto, placa, origen y destino." },
+      { name: "description", content: "Registra un movimiento con fotos, placa, origen, destino y ubicación de entrega." },
       { property: "og:title", content: "Nuevo movimiento · MovilizaPro" },
       { property: "og:description", content: "Registro rápido de movimientos con evidencia fotográfica." },
       { property: "og:type", content: "website" },
@@ -21,6 +21,8 @@ export const Route = createFileRoute("/_authenticated/app")({
 const SITES: SiteCode[] = ["X", "A", "B", "C"];
 const SITE_LABEL: Record<SiteCode, string> = { X: "BASE X", A: "TERM A", B: "TERM B", C: "TERM C" };
 const STATES = ["FL", "GA", "AL", "SC", "NC", "TX", "NY", "CA"];
+const BASE_SPOTS = ["CLEANERS", "SHOP", "TITE", "OIL", "PARKING"];
+const MAX_PHOTOS = 4;
 
 type Shift = { id: string; started_at: string; ended_at: string | null };
 type MovementRow = {
@@ -31,11 +33,23 @@ type MovementRow = {
   vehicle_model: string | null;
   origin: SiteCode;
   destination: SiteCode;
+  dropoff_location: string | null;
   occurred_at: string;
 };
 
+type LocalPhoto = { file: File; preview: string; note: string };
+
 function hhmm(iso: string) {
   return new Date(iso).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("read"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function DriverHome() {
@@ -49,9 +63,13 @@ function DriverHome() {
   const [model, setModel] = useState("");
   const [origin, setOrigin] = useState<SiteCode | null>(null);
   const [destination, setDestination] = useState<SiteCode | null>(null);
-  const [photo, setPhoto] = useState<{ file: File; preview: string } | null>(null);
+  const [dropoff, setDropoff] = useState("");
+  const [photos, setPhotos] = useState<LocalPhoto[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteMsg, setNoteMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function refresh() {
@@ -60,7 +78,7 @@ function DriverHome() {
       supabase.from("shifts").select("id, started_at, ended_at").eq("driver_id", user.id).is("ended_at", null).maybeSingle(),
       supabase
         .from("movements")
-        .select("id, movement_number, plate_state, plate, vehicle_model, origin, destination, occurred_at")
+        .select("id, movement_number, plate_state, plate, vehicle_model, origin, destination, dropoff_location, occurred_at")
         .eq("driver_id", user.id)
         .order("occurred_at", { ascending: false })
         .limit(20),
@@ -117,8 +135,22 @@ function DriverHome() {
   }
 
   function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) setPhoto({ file, preview: URL.createObjectURL(file) });
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    setPhotos((prev) => {
+      const room = MAX_PHOTOS - prev.length;
+      const next = files.slice(0, room).map((file) => ({ file, preview: URL.createObjectURL(file), note: "" }));
+      return [...prev, ...next];
+    });
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function removePhoto(index: number) {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setPhotoNote(index: number, value: string) {
+    setPhotos((prev) => prev.map((p, i) => (i === index ? { ...p, note: value } : p)));
   }
 
   function resetForm() {
@@ -126,7 +158,8 @@ function DriverHome() {
     setModel("");
     setOrigin(null);
     setDestination(null);
-    setPhoto(null);
+    setDropoff("");
+    setPhotos([]);
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -150,7 +183,7 @@ function DriverHome() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user || !origin || !destination || !plate.trim() || !photo) return;
+    if (!user || !origin || !destination || !plate.trim() || photos.length === 0) return;
     if (origin === destination) {
       setMessage("El origen y el destino no pueden ser iguales");
       return;
@@ -158,6 +191,7 @@ function DriverHome() {
     setBusy(true);
     setMessage(null);
     const cleanPlate = plate.trim().toUpperCase().replace(/\s+/g, "");
+    const cleanDropoff = dropoff.trim().toUpperCase() || null;
     const duplicate = movements.find(
       (m) =>
         m.plate === cleanPlate &&
@@ -173,7 +207,10 @@ function DriverHome() {
     const geo = await readGeo();
     const occurredAt = new Date().toISOString();
     try {
-      const photoPath = await uploadPhoto(user.id, photo.file);
+      const uploaded: PhotoEntry[] = [];
+      for (const p of photos) {
+        uploaded.push({ path: await uploadPhoto(user.id, p.file), note: p.note.trim() });
+      }
       const { error } = await supabase.from("movements").insert({
         driver_id: user.id,
         shift_id: shift?.id ?? null,
@@ -182,45 +219,67 @@ function DriverHome() {
         vehicle_model: model.trim() || null,
         origin,
         destination,
+        dropoff_location: cleanDropoff,
         occurred_at: occurredAt,
         latitude: geo.lat,
         longitude: geo.lng,
-        photo_path: photoPath,
+        photos: uploaded,
+        photo_path: uploaded[0]?.path ?? null,
         status: "sincronizado",
       });
       if (error) throw error;
-      setMessage(`Registrado: ${plateState}-${cleanPlate} · ${origin} → ${destination}`);
+      setMessage(`Registrado: ${plateState}-${cleanPlate} · ${origin} → ${destination}${cleanDropoff ? ` · ${cleanDropoff}` : ""}`);
       resetForm();
       void refresh();
     } catch {
-      const reader = new FileReader();
-      reader.onload = () => {
-        queueMovement({
-          localId: crypto.randomUUID(),
-          driver_id: user.id,
-          shift_id: shift?.id ?? null,
-          plate_state: plateState,
-          plate: cleanPlate,
-          vehicle_model: model.trim() || null,
-          origin,
-          destination,
-          occurred_at: occurredAt,
-          latitude: geo.lat,
-          longitude: geo.lng,
-          notes: null,
-          photoDataUrl: typeof reader.result === "string" ? reader.result : null,
-        });
-        setPendingCount(readPending().length);
-        setMessage("Sin conexión: guardado y se sincronizará automáticamente");
-        resetForm();
-      };
-      reader.readAsDataURL(photo.file);
+      const encoded = await Promise.all(
+        photos.map(async (p) => ({ dataUrl: await fileToDataUrl(p.file), note: p.note.trim() })),
+      );
+      queueMovement({
+        localId: crypto.randomUUID(),
+        driver_id: user.id,
+        shift_id: shift?.id ?? null,
+        plate_state: plateState,
+        plate: cleanPlate,
+        vehicle_model: model.trim() || null,
+        origin,
+        destination,
+        dropoff_location: cleanDropoff,
+        occurred_at: occurredAt,
+        latitude: geo.lat,
+        longitude: geo.lng,
+        notes: null,
+        photos: encoded,
+      });
+      setPendingCount(readPending().length);
+      setMessage("Sin conexión: guardado y se sincronizará automáticamente");
+      resetForm();
     } finally {
       setBusy(false);
     }
   }
 
-  const canSubmit = Boolean(plate.trim() && origin && destination && photo && !busy);
+  async function sendNote(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !note.trim()) return;
+    setNoteBusy(true);
+    setNoteMsg(null);
+    const { error } = await supabase.from("driver_notes").insert({
+      driver_id: user.id,
+      shift_id: shift?.id ?? null,
+      body: note.trim(),
+    });
+    setNoteBusy(false);
+    if (error) {
+      setNoteMsg("No se pudo enviar la nota. Intenta de nuevo.");
+      return;
+    }
+    setNote("");
+    setNoteMsg("Nota enviada de forma privada a la administración.");
+  }
+
+  const canSubmit = Boolean(plate.trim() && origin && destination && photos.length > 0 && !busy);
+  const dropoffHint = destination === "X" ? "Ej: CLEANERS, SHOP, TITE, OIL" : "Ej: D19, C04";
 
   return (
     <>
@@ -265,23 +324,66 @@ function DriverHome() {
       <section className="space-y-3">
         <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Nuevo registro</h2>
         <form onSubmit={submit} className="bg-card rounded-xl border border-border p-4 shadow-sm space-y-4">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="w-full aspect-[3/2] bg-secondary border-2 border-dashed border-border rounded-lg grid place-items-center overflow-hidden"
-          >
-            {photo ? (
-              <img src={photo.preview} alt="Foto del vehículo registrada" className="size-full object-cover" />
-            ) : (
-              <div className="text-center">
-                <div className="size-12 bg-muted rounded-full mx-auto mb-2 grid place-items-center border border-border">
-                  <span className="text-muted-foreground text-xs font-bold">FOTO</span>
-                </div>
-                <span className="text-[10px] font-semibold uppercase text-muted-foreground">Captura obligatoria</span>
-              </div>
-            )}
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={pickPhoto} className="hidden" />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase">
+                Fotos ({photos.length}/{MAX_PHOTOS})
+              </label>
+              <span className="text-[10px] text-muted-foreground">Llave, entrega y ubicación</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {Array.from({ length: MAX_PHOTOS }).map((_, i) => {
+                const p = photos[i];
+                return (
+                  <div key={i} className="space-y-1">
+                    {p ? (
+                      <>
+                        <div className="relative aspect-[4/3] rounded-lg overflow-hidden border border-border">
+                          <img src={p.preview} alt={`Foto ${i + 1} del movimiento`} className="size-full object-cover" />
+                          <span className="absolute top-1 left-1 bg-panel text-panel-foreground text-[10px] font-bold px-1.5 py-0.5 rounded">
+                            {i + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removePhoto(i)}
+                            className="absolute top-1 right-1 bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          >
+                            X
+                          </button>
+                        </div>
+                        <input
+                          value={p.note}
+                          onChange={(e) => setPhotoNote(i, e.target.value)}
+                          placeholder="Nota (ej: entregado)"
+                          className="w-full bg-secondary border border-border rounded px-2 py-1.5 text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => fileRef.current?.click()}
+                        disabled={i !== photos.length}
+                        className="w-full aspect-[4/3] bg-secondary border-2 border-dashed border-border rounded-lg grid place-items-center disabled:opacity-40"
+                      >
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                          {i === 0 ? "Foto 1 · obligatoria" : `Foto ${i + 1}`}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            onChange={pickPhoto}
+            className="hidden"
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -352,9 +454,36 @@ function DriverHome() {
             </div>
           </div>
 
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase">
+              Ubicación donde se dejó el vehículo
+            </label>
+            <input
+              value={dropoff}
+              onChange={(e) => setDropoff(e.target.value.toUpperCase())}
+              placeholder={dropoffHint}
+              className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono font-bold uppercase outline-none focus:ring-2 focus:ring-ring"
+            />
+            {destination === "X" && (
+              <div className="flex gap-1 flex-wrap pt-1">
+                {BASE_SPOTS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setDropoff(s)}
+                    className={`px-2 py-1 rounded text-[10px] font-bold ${dropoff === s ? "bg-primary text-primary-foreground" : "bg-secondary border border-border text-muted-foreground"}`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {origin && destination && plate && (
             <p className="font-mono text-sm font-bold">
-              {plateState}-{plate} · {origin} → {destination} · {profile?.initials}
+              {plateState}-{plate} · {origin} → {destination}
+              {dropoff ? ` · ${dropoff}` : ""} · {profile?.initials}
             </p>
           )}
           {message && <p className="text-xs font-semibold text-primary">{message}</p>}
@@ -384,6 +513,7 @@ function DriverHome() {
                   </p>
                   <p className="text-[10px] text-muted-foreground">
                     {m.vehicle_model || "Sin modelo"} • {hhmm(m.occurred_at)}
+                    {m.dropoff_location ? ` • ${m.dropoff_location}` : ""}
                   </p>
                 </div>
               </div>
@@ -396,6 +526,31 @@ function DriverHome() {
           ))}
           {movements.length === 0 && <p className="text-xs text-muted-foreground">Aún no hay movimientos registrados.</p>}
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Nota privada</h2>
+        <form onSubmit={sendNote} className="bg-card rounded-xl border border-border p-4 shadow-sm space-y-3">
+          <p className="text-[11px] text-muted-foreground">
+            Solo la administración puede leer estas notas. No aparecen en el historial de movimientos ni para otros
+            conductores.
+          </p>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={4}
+            placeholder="Retrasos, detalles del vehículo, incidencias, reportes…"
+            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          {noteMsg && <p className="text-xs font-semibold text-primary">{noteMsg}</p>}
+          <button
+            type="submit"
+            disabled={!note.trim() || noteBusy}
+            className="w-full bg-panel disabled:opacity-50 text-panel-foreground font-bold py-3 rounded-xl uppercase tracking-widest text-xs"
+          >
+            {noteBusy ? "Enviando…" : "Enviar nota privada"}
+          </button>
+        </form>
       </section>
     </>
   );
