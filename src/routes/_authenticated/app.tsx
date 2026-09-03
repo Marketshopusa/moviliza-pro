@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { queueMovement, readPending, syncPending, uploadPhoto, type PhotoEntry, type SiteCode } from "@/lib/offline";
 import { PushToTalk } from "@/components/PushToTalk";
+import { PlateScanner } from "@/components/PlateScanner";
+
 
 
 export const Route = createFileRoute("/_authenticated/app")({
