@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
+import { Route as AuthenticatedMovimientosRouteImport } from './routes/_authenticated/movimientos'
+import { Route as AuthenticatedPanelRouteImport } from './routes/_authenticated/panel'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -33,16 +35,31 @@ const AuthenticatedAppRoute = AuthenticatedAppRouteImport.update({
   path: '/app',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMovimientosRoute =
+  AuthenticatedMovimientosRouteImport.update({
+    id: '/movimientos',
+    path: '/movimientos',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedPanelRoute = AuthenticatedPanelRouteImport.update({
+  id: '/panel',
+  path: '/panel',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRoute
+  '/movimientos': typeof AuthenticatedMovimientosRoute
+  '/panel': typeof AuthenticatedPanelRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRoute
+  '/movimientos': typeof AuthenticatedMovimientosRoute
+  '/panel': typeof AuthenticatedPanelRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -50,13 +67,22 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/app': typeof AuthenticatedAppRoute
+  '/_authenticated/movimientos': typeof AuthenticatedMovimientosRoute
+  '/_authenticated/panel': typeof AuthenticatedPanelRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/app'
+  fullPaths: '/' | '/auth' | '/app' | '/movimientos' | '/panel'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/app'
-  id: '__root__' | '/' | '/_authenticated' | '/auth' | '/_authenticated/app'
+  to: '/' | '/auth' | '/app' | '/movimientos' | '/panel'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/app'
+    | '/_authenticated/movimientos'
+    | '/_authenticated/panel'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,15 +121,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/movimientos': {
+      id: '/_authenticated/movimientos'
+      path: '/movimientos'
+      fullPath: '/movimientos'
+      preLoaderRoute: typeof AuthenticatedMovimientosRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/panel': {
+      id: '/_authenticated/panel'
+      path: '/panel'
+      fullPath: '/panel'
+      preLoaderRoute: typeof AuthenticatedPanelRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAppRoute: typeof AuthenticatedAppRoute
+  AuthenticatedMovimientosRoute: typeof AuthenticatedMovimientosRoute
+  AuthenticatedPanelRoute: typeof AuthenticatedPanelRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAppRoute: AuthenticatedAppRoute,
+  AuthenticatedMovimientosRoute: AuthenticatedMovimientosRoute,
+  AuthenticatedPanelRoute: AuthenticatedPanelRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
