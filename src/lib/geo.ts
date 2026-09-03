@@ -45,18 +45,11 @@ export function useLocationBeacon(userId: string | null | undefined, enabled: bo
       maximumAge: 30_000,
     });
 
-    // Al cerrar la pestaña o la app el driver deja de ser rastreado.
-    const onHide = () => {
-      if (document.visibilityState === "hidden" && userId) void markOffShift(userId).catch(() => {});
-    };
-    window.addEventListener("pagehide", onHide);
-    document.addEventListener("visibilitychange", onHide);
-
+    // La sesión persiste aunque el usuario cambie de pestaña o minimice la app:
+    // el GPS solo se apaga cuando el usuario presiona SALIR (ver AppShell).
     return () => {
       active = false;
       navigator.geolocation.clearWatch(watchId);
-      window.removeEventListener("pagehide", onHide);
-      document.removeEventListener("visibilitychange", onHide);
     };
   }, [userId, enabled]);
 
