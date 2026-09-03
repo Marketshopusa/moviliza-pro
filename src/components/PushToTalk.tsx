@@ -34,9 +34,8 @@ export function PushToTalk() {
   const playingRef = useRef(false);
   const namesRef = useRef<Record<string, string>>({});
   const audioElRef = useRef<HTMLAudioElement | null>(null);
-  const keepAliveRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
-  const [needsUnlock, setNeedsUnlock] = useState(false);
+  const blockedAudioRef = useRef<{ url: string; who: string } | null>(null);
 
   // Un único elemento de audio reutilizado: los navegadores móviles solo permiten
   // reproducir en un elemento que ya fue "desbloqueado" por un gesto del usuario.
@@ -50,31 +49,18 @@ export function PushToTalk() {
     return audioElRef.current;
   }, []);
 
-  // Pista silenciosa en bucle: mantiene viva la sesión de audio del navegador
-  // aunque el usuario salga de la app, para que las transmisiones se sigan oyendo.
-  const startKeepAlive = useCallback(async () => {
-    if (typeof window === "undefined") return;
-    if (!keepAliveRef.current) {
-      const el = new Audio(SILENCE);
-      el.loop = true;
-      el.volume = 0.0001;
-      el.setAttribute("playsinline", "true");
-      keepAliveRef.current = el;
-    }
-    try {
-      await keepAliveRef.current.play();
-    } catch {
-      /* se reintenta con el próximo gesto */
-    }
-  }, []);
-
   const unlockAudio = useCallback(async () => {
     const el = getAudioEl();
-    if (!el || unlockedRef.current) {
-      void startKeepAlive();
-      return;
-    }
+    if (!el) return;
     try {
+      if (blockedAudioRef.current) {
+        playingRef.current = true;
+        await el.play();
+        blockedAudioRef.current = null;
+        unlockedRef.current = true;
+        return;
+      }
+      if (unlockedRef.current) return;
       el.muted = true;
       el.src = SILENCE;
       await el.play();
@@ -82,34 +68,19 @@ export function PushToTalk() {
       el.currentTime = 0;
       el.muted = false;
       unlockedRef.current = true;
-      setNeedsUnlock(false);
-      void startKeepAlive();
     } catch {
-      setNeedsUnlock(true);
+      // El siguiente gesto del usuario vuelve a intentarlo automáticamente.
     }
-  }, [getAudioEl, startKeepAlive]);
+  }, [getAudioEl]);
 
   // Cualquier toque en la pantalla habilita la reproducción de audio entrante.
   useEffect(() => {
     const handler = () => void unlockAudio();
     window.addEventListener("pointerdown", handler, { once: false });
-    const revive = () => {
-      if (unlockedRef.current) void startKeepAlive();
-    };
-    document.addEventListener("visibilitychange", revive);
     return () => {
       window.removeEventListener("pointerdown", handler);
-      document.removeEventListener("visibilitychange", revive);
     };
-  }, [unlockAudio, startKeepAlive]);
-
-  // Detiene la pista silenciosa al desmontar (cierre de sesión / salida).
-  useEffect(() => {
-    return () => {
-      keepAliveRef.current?.pause();
-      keepAliveRef.current = null;
-    };
-  }, []);
+  }, [unlockAudio]);
 
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
@@ -174,8 +145,9 @@ export function PushToTalk() {
     audio.muted = false;
     audio.src = next.url;
     void audio.play().catch(() => {
-      setNeedsUnlock(true);
-      playNext();
+      blockedAudioRef.current = next;
+      playingRef.current = false;
+      setStatus("Audio pendiente · toca la pantalla para escucharlo");
     });
   }, [getAudioEl]);
 
@@ -352,6 +324,7 @@ export function PushToTalk() {
           disabled={!isMember}
           onPointerDown={(e) => {
             e.preventDefault();
+            void unlockAudio();
             setPressed(true);
             void startTalk();
           }}
@@ -396,15 +369,6 @@ export function PushToTalk() {
                 ? "Mantén presionado para hablar"
                 : "Ingresa la clave del canal"}
         </p>
-        {needsUnlock && (
-          <button
-            type="button"
-            onClick={() => void unlockAudio()}
-            className="mt-1 text-[9px] font-bold uppercase tracking-wider bg-ptt text-white rounded px-2 py-1"
-          >
-            Activar audio
-          </button>
-        )}
       </div>
 
       {open && (
