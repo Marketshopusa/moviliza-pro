@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { useLiveVoice } from "@/lib/live-voice";
 
 type Channel = { id: string; name: string; is_admin_only: boolean };
 type VoiceMessage = { id: string; audio_path: string; sender_id: string; created_at: string };
@@ -89,6 +90,7 @@ export function PushToTalk() {
   const blockedAudioRef = useRef<{ url: string; who: string } | null>(null);
   const receivedIdsRef = useRef<Set<string>>(new Set());
   const messageCursorRef = useRef<string>(new Date().toISOString());
+  const liveTalkRef = useRef(false);
 
   // Un único elemento de audio reutilizado: los navegadores móviles solo permiten
   // reproducir en un elemento que ya fue "desbloqueado" por un gesto del usuario.
@@ -129,16 +131,27 @@ export function PushToTalk() {
 
   // Cualquier toque en la pantalla habilita la reproducción de audio entrante.
   useEffect(() => {
-    const handler = () => void unlockAudio();
+    const handler = () => {
+      void unlockAudio();
+      live.resumeAudio();
+    };
     window.addEventListener("pointerdown", handler, { once: false });
     return () => {
       window.removeEventListener("pointerdown", handler);
     };
-  }, [unlockAudio]);
+  }, [unlockAudio, live]);
 
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
   const isMember = channelId ? memberIds.includes(channelId) : false;
+
+  // Voz en vivo (WebRTC). Los clips solo se usan si no hay nadie conectado.
+  const live = useLiveVoice({
+    channelId: isMember ? channelId : null,
+    enabled: isMember,
+    userId: user?.id ?? null,
+    displayName: profile?.initials || profile?.full_name || "Conductor",
+  });
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -349,6 +362,16 @@ export function PushToTalk() {
 
   async function startTalk() {
     if (!user || !channelId || !isMember || recording) return;
+    live.resumeAudio();
+    if (live.peerCount > 0) {
+      const ok = await live.startTransmit();
+      if (ok) {
+        liveTalkRef.current = true;
+        setRecording(true);
+        setStatus(null);
+        return;
+      }
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const rec = new MediaRecorder(stream);
@@ -400,6 +423,13 @@ export function PushToTalk() {
   }
 
   function stopTalk() {
+    if (liveTalkRef.current) {
+      liveTalkRef.current = false;
+      live.stopTransmit();
+      setRecording(false);
+      setStatus(null);
+      return;
+    }
     if (!recording) return;
     setRecording(false);
     recorderRef.current?.stop();
@@ -456,11 +486,15 @@ export function PushToTalk() {
         <p className="text-[9px] text-panel-foreground/60 mt-0.5 leading-tight">
           {recording
             ? "Transmitiendo…"
-            : speaking
-              ? `Habla ${speaking}`
-              : isMember
-                ? "Mantén presionado para hablar"
-                : "Ingresa la clave del canal"}
+            : live.speaker
+              ? `Habla ${live.speaker}`
+              : speaking
+                ? `Habla ${speaking}`
+                : !isMember
+                  ? "Ingresa la clave del canal"
+                  : live.peerCount > 0
+                    ? `En vivo · ${live.peerCount} en línea`
+                    : "Mantén presionado para hablar"}
         </p>
       </div>
 
