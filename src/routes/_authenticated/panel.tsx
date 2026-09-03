@@ -107,7 +107,7 @@ function PanelPage() {
   }, [rows]);
 
   function exportCsv() {
-    const header = ["numero", "fecha", "conductor", "estado", "placa", "modelo", "origen", "destino"];
+    const header = ["numero", "fecha", "conductor", "estado", "placa", "modelo", "origen", "destino", "ubicacion"];
     const lines = rows.map((r) =>
       [
         r.movement_number,
@@ -118,6 +118,7 @@ function PanelPage() {
         r.vehicle_model ?? "",
         r.origin,
         r.destination,
+        r.dropoff_location ?? "",
       ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(","),
