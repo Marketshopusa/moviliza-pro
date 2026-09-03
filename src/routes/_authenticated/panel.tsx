@@ -95,7 +95,7 @@ function PanelPage() {
           .lte("occurred_at", end)
           .order("occurred_at", { ascending: false })
           .limit(1000),
-        supabase.from("profiles").select("id, full_name, initials"),
+        supabase.from("profiles").select("id, full_name, initials, avatar_url"),
         supabase
           .from("driver_notes")
           .select("id, driver_id, body, created_at")
