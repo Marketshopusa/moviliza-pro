@@ -206,6 +206,7 @@ function PanelPage() {
               </p>
               <p className="text-[10px] text-muted-foreground">
                 {names[m.driver_id] ?? "Conductor"} • {new Date(m.occurred_at).toLocaleString("es-US")}
+                {m.dropoff_location ? ` • ${m.dropoff_location}` : ""}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -216,6 +217,24 @@ function PanelPage() {
           </div>
         ))}
       </section>
+
+      <section className="space-y-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          Notas privadas de conductores
+        </h2>
+        {notes.map((n) => (
+          <div key={n.id} className="bg-card p-3 rounded-lg border border-border space-y-1">
+            <p className="text-[10px] font-bold uppercase text-muted-foreground">
+              {names[n.driver_id] ?? "Conductor"} • {new Date(n.created_at).toLocaleString("es-US")}
+            </p>
+            <p className="text-xs whitespace-pre-wrap">{n.body}</p>
+          </div>
+        ))}
+        {notes.length === 0 && !busy && (
+          <p className="text-xs text-muted-foreground">Sin notas en el rango seleccionado.</p>
+        )}
+      </section>
+
     </>
   );
 }
