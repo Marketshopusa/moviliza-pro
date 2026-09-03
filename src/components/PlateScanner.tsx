@@ -78,8 +78,6 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
         // Recorta la franja central y la reduce: menos píxeles = lectura más rápida.
         const cw = Math.round(video.videoWidth * 0.8 * 0.6);
         const ch = Math.round(video.videoHeight * 0.32 * 0.6);
-        const sx = Math.round((video.videoWidth * 0.1) * 0.6);
-        const sy = Math.round((video.videoHeight * 0.34) * 0.6);
         canvas.width = cw;
         canvas.height = ch;
         const ctx = canvas.getContext("2d");
