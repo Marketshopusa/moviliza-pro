@@ -30,6 +30,46 @@ export function PushToTalk() {
   const queueRef = useRef<{ url: string; who: string }[]>([]);
   const playingRef = useRef(false);
   const namesRef = useRef<Record<string, string>>({});
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const unlockedRef = useRef(false);
+  const [needsUnlock, setNeedsUnlock] = useState(false);
+
+  // Un único elemento de audio reutilizado: los navegadores móviles solo permiten
+  // reproducir en un elemento que ya fue "desbloqueado" por un gesto del usuario.
+  const getAudioEl = useCallback(() => {
+    if (!audioElRef.current && typeof window !== "undefined") {
+      const el = new Audio();
+      el.preload = "auto";
+      el.setAttribute("playsinline", "true");
+      audioElRef.current = el;
+    }
+    return audioElRef.current;
+  }, []);
+
+  const unlockAudio = useCallback(async () => {
+    const el = getAudioEl();
+    if (!el || unlockedRef.current) return;
+    try {
+      el.muted = true;
+      el.src =
+        "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+      await el.play();
+      el.pause();
+      el.currentTime = 0;
+      el.muted = false;
+      unlockedRef.current = true;
+      setNeedsUnlock(false);
+    } catch {
+      setNeedsUnlock(true);
+    }
+  }, [getAudioEl]);
+
+  // Cualquier toque en la pantalla habilita la reproducción de audio entrante.
+  useEffect(() => {
+    const handler = () => void unlockAudio();
+    window.addEventListener("pointerdown", handler, { once: false });
+    return () => window.removeEventListener("pointerdown", handler);
+  }, [unlockAudio]);
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
   const isMember = channelId ? memberIds.includes(channelId) : false;
@@ -74,11 +114,17 @@ export function PushToTalk() {
     }
     playingRef.current = true;
     setSpeaking(next.who);
-    const audio = new Audio(next.url);
+    const audio = getAudioEl();
+    if (!audio) return;
     audio.onended = () => playNext();
     audio.onerror = () => playNext();
-    void audio.play().catch(() => playNext());
-  }, []);
+    audio.muted = false;
+    audio.src = next.url;
+    void audio.play().catch(() => {
+      setNeedsUnlock(true);
+      playNext();
+    });
+  }, [getAudioEl]);
 
   const enqueue = useCallback(
     async (path: string, senderId: string) => {
@@ -297,6 +343,15 @@ export function PushToTalk() {
                 ? "Mantén presionado para hablar"
                 : "Ingresa la clave del canal"}
         </p>
+        {needsUnlock && (
+          <button
+            type="button"
+            onClick={() => void unlockAudio()}
+            className="mt-1 text-[9px] font-bold uppercase tracking-wider bg-ptt text-white rounded px-2 py-1"
+          >
+            Activar audio
+          </button>
+        )}
       </div>
 
       {open && (
