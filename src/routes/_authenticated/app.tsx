@@ -487,12 +487,23 @@ function DriverHome() {
 
           <button
             type="button"
+            onClick={() => {
+              setScanMsg(null);
+              setScannerOpen(true);
+            }}
+            className="w-full bg-accent text-accent-foreground rounded-lg py-3 text-[11px] font-bold uppercase tracking-widest"
+          >
+            Escanear placa en vivo
+          </button>
+          <button
+            type="button"
             onClick={() => scanRef.current?.click()}
             disabled={scanning}
-            className="w-full bg-secondary border border-border rounded-lg py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground disabled:opacity-50"
+            className="w-full bg-secondary border border-border rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground disabled:opacity-50"
           >
-            {scanning ? "Leyendo placa…" : "Escanear placa con la cámara"}
+            {scanning ? "Leyendo placa…" : "Leer placa desde una foto"}
           </button>
+          <PlateScanner open={scannerOpen} onClose={closeScanner} onDetected={handleScanned} />
           <input
             ref={scanRef}
             type="file"
@@ -501,6 +512,7 @@ function DriverHome() {
             onChange={scanPlate}
             className="hidden"
           />
+
           {scanMsg && <p className="text-[11px] text-muted-foreground">{scanMsg}</p>}
 
 
