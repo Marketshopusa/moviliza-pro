@@ -29,6 +29,7 @@ type Row = {
   vehicle_model: string | null;
   origin: SiteCode;
   destination: SiteCode;
+  dropoff_location: string | null;
   occurred_at: string;
 };
 
