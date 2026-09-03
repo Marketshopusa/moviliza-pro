@@ -40,6 +40,11 @@ type NoteRow = { id: string; driver_id: string; body: string; created_at: string
 
 type ShiftRow = { id: string; driver_id: string; started_at: string; ended_at: string | null };
 
+type WorkShift = { id: string; name: string; start_time: string; end_time: string };
+
+type Assignment = { id: string; shift_id: string; email: string; user_id: string | null };
+
+
 type LocRow = {
   user_id: string;
   latitude: number;
