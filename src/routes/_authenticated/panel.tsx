@@ -218,6 +218,73 @@ function PanelPage() {
         </button>
       </div>
 
+      <section className="space-y-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          GPS de conductores (solo administración)
+        </h2>
+        {locs.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Aún no hay ubicaciones. El GPS se activa en el teléfono del conductor al iniciar sesión.
+          </p>
+        )}
+        {locs.map((l) => {
+          const f = freshnessLabel(l.recorded_at);
+          return (
+            <button
+              key={l.user_id}
+              onClick={() => setFocus(focus?.user_id === l.user_id ? null : l)}
+              className="w-full text-left bg-card border border-border rounded-lg p-3 flex items-center gap-3"
+            >
+              <div className="size-9 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-[10px] font-mono font-bold shrink-0">
+                {avatars[l.user_id] ? (
+                  <img
+                    src={avatars[l.user_id]}
+                    alt={`Foto de ${names[l.user_id] ?? "conductor"}`}
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  (names[l.user_id] ?? "?").slice(0, 2).toUpperCase()
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold truncate">{names[l.user_id] ?? "Conductor"}</p>
+                <p className="text-[10px] text-muted-foreground font-mono">
+                  {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)}
+                  {l.accuracy ? ` · ±${Math.round(l.accuracy)} m` : ""}
+                </p>
+              </div>
+              <span
+                className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border ${
+                  f.fresh && l.is_on_shift
+                    ? "text-primary border-primary/40"
+                    : "text-muted-foreground border-border"
+                }`}
+              >
+                {l.is_on_shift ? f.label : "Fuera de turno"}
+              </span>
+            </button>
+          );
+        })}
+        {focus && (
+          <div className="rounded-xl overflow-hidden border border-border">
+            <iframe
+              title={`Mapa de ${names[focus.user_id] ?? "conductor"}`}
+              className="w-full h-64"
+              loading="lazy"
+              src={`https://www.openstreetmap.org/export/embed.html?bbox=${focus.longitude - 0.005}%2C${focus.latitude - 0.004}%2C${focus.longitude + 0.005}%2C${focus.latitude + 0.004}&layer=mapnik&marker=${focus.latitude}%2C${focus.longitude}`}
+            />
+            <a
+              href={`https://www.google.com/maps?q=${focus.latitude},${focus.longitude}`}
+              target="_blank"
+              rel="noreferrer"
+              className="block bg-card p-2 text-center text-[10px] font-bold uppercase tracking-widest text-primary"
+            >
+              Abrir en Google Maps
+            </a>
+          </div>
+        )}
+      </section>
+
       <div className="bg-panel text-panel-foreground rounded-xl p-4 grid grid-cols-4 gap-3">
         {(Object.keys(SITE_LABEL) as SiteCode[]).map((s) => (
           <div key={s}>
