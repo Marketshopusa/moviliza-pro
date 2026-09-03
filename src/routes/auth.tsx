@@ -29,13 +29,20 @@ function AuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  function traducir(msg: string) {
+    if (/already registered/i.test(msg)) return "Ese correo ya está registrado. Usa «Entrar».";
+    if (/Invalid login credentials/i.test(msg)) return "Correo o contraseña incorrectos.";
+    if (/only request this after/i.test(msg)) return "Espera unos segundos e inténtalo de nuevo.";
+    return msg;
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
       if (mode === "signup") {
-        const { error: err } = await supabase.auth.signUp({
+        const { data, error: err } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -44,17 +51,22 @@ function AuthPage() {
           },
         });
         if (err) throw err;
+        if (!data.session) {
+          const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInErr) throw signInErr;
+        }
       } else {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
       }
       navigate({ to: "/app" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error de autenticación");
+      setError(traducir(err instanceof Error ? err.message : "Error de autenticación"));
     } finally {
       setBusy(false);
     }
   }
+
 
   return (
     <div className="min-h-screen bg-background grid place-items-center px-4 font-sans">
