@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { queueMovement, readPending, syncPending, uploadPhoto, type PhotoEntry, type SiteCode } from "@/lib/offline";
 import { PushToTalk } from "@/components/PushToTalk";
+import { PlateScanner } from "@/components/PlateScanner";
+
 
 
 export const Route = createFileRoute("/_authenticated/app")({
@@ -73,7 +75,9 @@ function DriverHome() {
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteMsg, setNoteMsg] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+
   const [modelFromRegistry, setModelFromRegistry] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const scanRef = useRef<HTMLInputElement>(null);
@@ -187,6 +191,7 @@ function DriverHome() {
     };
   }, [plate, plateState]);
 
+  // Lectura desde una foto (respaldo si la cámara en vivo no está disponible).
   async function scanPlate(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (scanRef.current) scanRef.current.value = "";
@@ -208,6 +213,16 @@ function DriverHome() {
       setScanning(false);
     }
   }
+
+  const closeScanner = useCallback(() => setScannerOpen(false), []);
+  const handleScanned = useCallback((read: { plate: string; state: string | null }) => {
+    setPlate(read.plate);
+    if (read.state && STATES.includes(read.state)) setPlateState(read.state);
+    setScanMsg(
+      `Placa detectada: ${read.state ? `${read.state}-` : ""}${read.plate}. Verifica antes de guardar.`,
+    );
+  }, []);
+
 
   function resetForm() {
     setPlate("");
@@ -472,12 +487,23 @@ function DriverHome() {
 
           <button
             type="button"
+            onClick={() => {
+              setScanMsg(null);
+              setScannerOpen(true);
+            }}
+            className="w-full bg-accent text-accent-foreground rounded-lg py-3 text-[11px] font-bold uppercase tracking-widest"
+          >
+            Escanear placa en vivo
+          </button>
+          <button
+            type="button"
             onClick={() => scanRef.current?.click()}
             disabled={scanning}
-            className="w-full bg-secondary border border-border rounded-lg py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground disabled:opacity-50"
+            className="w-full bg-secondary border border-border rounded-lg py-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground disabled:opacity-50"
           >
-            {scanning ? "Leyendo placa…" : "Escanear placa con la cámara"}
+            {scanning ? "Leyendo placa…" : "Leer placa desde una foto"}
           </button>
+          <PlateScanner open={scannerOpen} onClose={closeScanner} onDetected={handleScanned} />
           <input
             ref={scanRef}
             type="file"
@@ -486,6 +512,7 @@ function DriverHome() {
             onChange={scanPlate}
             className="hidden"
           />
+
           {scanMsg && <p className="text-[11px] text-muted-foreground">{scanMsg}</p>}
 
 
