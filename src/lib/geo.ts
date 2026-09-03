@@ -45,11 +45,21 @@ export function useLocationBeacon(userId: string | null | undefined, enabled: bo
       maximumAge: 30_000,
     });
 
+    // Al cerrar la pestaña o la app el driver deja de ser rastreado.
+    const onHide = () => {
+      if (document.visibilityState === "hidden" && userId) void markOffShift(userId).catch(() => {});
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onHide);
+
     return () => {
       active = false;
       navigator.geolocation.clearWatch(watchId);
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onHide);
     };
   }, [userId, enabled]);
+
 }
 
 /** Marca la ubicación como fuera de turno (al cerrar sesión / terminar turno). */
