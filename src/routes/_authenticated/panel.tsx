@@ -429,11 +429,11 @@ function PanelPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold truncate">{d.name}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {d.movements.length} mov · {d.notes.length} notas
-                    {lastShift ? ` · ${hhmm(lastShift.started_at)}–${hhmm(lastShift.ended_at)}` : ""}
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {d.assignedShift?.name ?? "Sin turno asignado"} · {d.movements.length} mov · {d.notes.length} notas
                   </p>
                 </div>
+
                 {f && (
                   <span
                     className={`text-[10px] font-bold uppercase px-2 py-1 rounded border shrink-0 ${
