@@ -208,15 +208,17 @@ function DriverHome() {
   }
 
   function resetForm() {
-
     setPlate("");
     setModel("");
     setOrigin(null);
     setDestination(null);
     setDropoff("");
     setPhotos([]);
+    setScanMsg(null);
+    setModelFromRegistry(false);
     if (fileRef.current) fileRef.current.value = "";
   }
+
 
   function readGeo(): Promise<{ lat: number | null; lng: number | null }> {
     if (typeof navigator === "undefined" || !navigator.geolocation)
