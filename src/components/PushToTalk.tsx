@@ -9,6 +9,56 @@ const LAST_CHANNEL_KEY = "movpro.voice.channel";
 const SILENCE =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
 
+function writeAscii(view: DataView, offset: number, value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+async function convertToCompatibleWav(source: Blob) {
+  const AudioContextClass = window.AudioContext;
+  const context = new AudioContextClass();
+  try {
+    const decoded = await context.decodeAudioData(await source.arrayBuffer());
+    const targetRate = Math.min(16000, decoded.sampleRate);
+    const frameCount = Math.max(1, Math.floor(decoded.duration * targetRate));
+    const mono = new Float32Array(frameCount);
+    const ratio = decoded.sampleRate / targetRate;
+
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const sourceFrame = Math.min(decoded.length - 1, Math.floor(frame * ratio));
+      let sample = 0;
+      for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+        sample += decoded.getChannelData(channel)[sourceFrame] ?? 0;
+      }
+      mono[frame] = sample / decoded.numberOfChannels;
+    }
+
+    const buffer = new ArrayBuffer(44 + mono.length * 2);
+    const view = new DataView(buffer);
+    writeAscii(view, 0, "RIFF");
+    view.setUint32(4, 36 + mono.length * 2, true);
+    writeAscii(view, 8, "WAVE");
+    writeAscii(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, targetRate, true);
+    view.setUint32(28, targetRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(view, 36, "data");
+    view.setUint32(40, mono.length * 2, true);
+    for (let index = 0; index < mono.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, mono[index] ?? 0));
+      view.setInt16(44 + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+    return new Blob([buffer], { type: "audio/wav" });
+  } finally {
+    void context.close();
+  }
+}
+
 
 export function PushToTalk() {
   const { user, isSupervisor, isAdmin, profile } = useAuth();
@@ -310,15 +360,24 @@ export function PushToTalk() {
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const duration = Date.now() - startedRef.current;
-        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
-        if (duration < 400 || blob.size === 0) {
+        const recordedBlob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+        if (duration < 400 || recordedBlob.size === 0) {
           setStatus("Transmisión muy corta");
           return;
         }
-        const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+        setStatus("Enviando…");
+        let uploadBlob: Blob;
+        let extension: "wav" | "m4a" | "webm";
+        try {
+          uploadBlob = await convertToCompatibleWav(recordedBlob);
+          extension = "wav";
+        } catch {
+          uploadBlob = recordedBlob;
+          extension = recordedBlob.type.includes("mp4") ? "m4a" : "webm";
+        }
         const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
-        const { error: upErr } = await supabase.storage.from("voice-clips").upload(path, blob, {
-          contentType: blob.type,
+        const { error: upErr } = await supabase.storage.from("voice-clips").upload(path, uploadBlob, {
+          contentType: uploadBlob.type,
           upsert: false,
         });
         if (upErr) {
