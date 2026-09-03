@@ -5,6 +5,9 @@ import { useAuth } from "@/lib/auth";
 type Channel = { id: string; name: string; is_admin_only: boolean };
 
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
+const SILENCE =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+
 
 export function PushToTalk() {
   const { user, isSupervisor, isAdmin, profile } = useAuth();
