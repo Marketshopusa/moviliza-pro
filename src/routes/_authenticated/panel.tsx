@@ -108,11 +108,25 @@ function PanelPage() {
       setRows((m as Row[]) ?? []);
       setNotes((n as NoteRow[]) ?? []);
       const map: Record<string, string> = {};
-      for (const row of (p as { id: string; full_name: string; initials: string }[]) ?? []) {
+      const profs = (p as { id: string; full_name: string; initials: string; avatar_url: string | null }[]) ?? [];
+      for (const row of profs) {
         map[row.id] = row.full_name || row.initials;
       }
       setNames(map);
       setBusy(false);
+      const withAvatar = profs.filter((r) => r.avatar_url);
+      if (withAvatar.length > 0) {
+        const { data: signed } = await supabase.storage
+          .from("driver-avatars")
+          .createSignedUrls(withAvatar.map((r) => r.avatar_url as string), 3600);
+        if (!active) return;
+        const amap: Record<string, string> = {};
+        (signed ?? []).forEach((s, i) => {
+          const owner = withAvatar[i];
+          if (owner && s.signedUrl) amap[owner.id] = s.signedUrl;
+        });
+        setAvatars(amap);
+      }
     })();
     return () => {
       active = false;
