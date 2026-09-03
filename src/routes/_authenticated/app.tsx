@@ -70,7 +70,12 @@ function DriverHome() {
   const [note, setNote] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteMsg, setNoteMsg] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [modelFromRegistry, setModelFromRegistry] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
+
 
   async function refresh() {
     if (!user) return;
