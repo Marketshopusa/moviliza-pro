@@ -365,19 +365,17 @@ export function PushToTalk() {
           setStatus("Transmisión muy corta");
           return;
         }
-        setStatus("Enviando…");
+        setStatus("Preparando audio…");
         let uploadBlob: Blob;
-        let extension: "wav" | "m4a" | "webm";
         try {
           uploadBlob = await convertToCompatibleWav(recordedBlob);
-          extension = "wav";
         } catch {
-          uploadBlob = recordedBlob;
-          extension = recordedBlob.type.includes("mp4") ? "m4a" : "webm";
+          setStatus("Este teléfono no pudo preparar el audio. Intenta nuevamente.");
+          return;
         }
-        const path = `${user.id}/${crypto.randomUUID()}.${extension}`;
+        const path = `${user.id}/${crypto.randomUUID()}.wav`;
         const { error: upErr } = await supabase.storage.from("voice-clips").upload(path, uploadBlob, {
-          contentType: uploadBlob.type,
+          contentType: "audio/wav",
           upsert: false,
         });
         if (upErr) {
