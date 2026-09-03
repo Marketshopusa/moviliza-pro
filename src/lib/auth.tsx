@@ -87,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role,
         loading,
         isSupervisor: role === "supervisor" || role === "administrador",
+        isAdmin: role === "administrador",
         refreshProfile: async () => {
           if (user) await loadProfile(user.id);
         },
