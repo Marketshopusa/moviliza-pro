@@ -70,7 +70,12 @@ function DriverHome() {
   const [note, setNote] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteMsg, setNoteMsg] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [modelFromRegistry, setModelFromRegistry] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const scanRef = useRef<HTMLInputElement>(null);
+
 
   async function refresh() {
     if (!user) return;
@@ -153,6 +158,55 @@ function DriverHome() {
     setPhotos((prev) => prev.map((p, i) => (i === index ? { ...p, note: value } : p)));
   }
 
+  // Registro interno de vehículos: al escribir/escanear la placa se autocompleta el modelo.
+  useEffect(() => {
+    const clean = plate.trim().toUpperCase().replace(/\s+/g, "");
+    if (clean.length < 4) return;
+    let active = true;
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from("vehicles")
+        .select("vehicle_model")
+        .eq("plate_state", plateState)
+        .eq("plate", clean)
+        .maybeSingle();
+      if (!active) return;
+      const known = data?.vehicle_model ?? "";
+      if (known) {
+        setModel((current) => (current.trim() ? current : known));
+        setModelFromRegistry(true);
+      } else {
+        setModelFromRegistry(false);
+      }
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [plate, plateState]);
+
+  async function scanPlate(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (scanRef.current) scanRef.current.value = "";
+    if (!file) return;
+    setScanning(true);
+    setScanMsg("Leyendo la placa…");
+    try {
+      const { scanPlateFromImage } = await import("@/lib/plate-ocr");
+      const detected = await scanPlateFromImage(file);
+      if (detected) {
+        setPlate(detected);
+        setScanMsg(`Placa detectada: ${detected}. Verifica antes de guardar.`);
+      } else {
+        setScanMsg("No se pudo leer la placa. Escríbela manualmente.");
+      }
+    } catch {
+      setScanMsg("No se pudo leer la placa. Escríbela manualmente.");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   function resetForm() {
     setPlate("");
     setModel("");
@@ -160,8 +214,11 @@ function DriverHome() {
     setDestination(null);
     setDropoff("");
     setPhotos([]);
+    setScanMsg(null);
+    setModelFromRegistry(false);
     if (fileRef.current) fileRef.current.value = "";
   }
+
 
   function readGeo(): Promise<{ lat: number | null; lng: number | null }> {
     if (typeof navigator === "undefined" || !navigator.geolocation)
@@ -411,15 +468,43 @@ function DriverHome() {
             </div>
           </div>
 
+          <button
+            type="button"
+            onClick={() => scanRef.current?.click()}
+            disabled={scanning}
+            className="w-full bg-secondary border border-border rounded-lg py-2.5 text-[11px] font-bold uppercase tracking-widest text-foreground disabled:opacity-50"
+          >
+            {scanning ? "Leyendo placa…" : "Escanear placa con la cámara"}
+          </button>
+          <input
+            ref={scanRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={scanPlate}
+            className="hidden"
+          />
+          {scanMsg && <p className="text-[11px] text-muted-foreground">{scanMsg}</p>}
+
+
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-muted-foreground uppercase">Marca / modelo</label>
             <input
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => {
+                setModel(e.target.value);
+                setModelFromRegistry(false);
+              }}
               placeholder="Toyota Corolla"
               className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-ring"
             />
+            {modelFromRegistry && (
+              <p className="text-[10px] font-bold uppercase tracking-widest text-success">
+                Modelo tomado del registro interno
+              </p>
+            )}
           </div>
+
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
