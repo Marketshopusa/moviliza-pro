@@ -7,6 +7,28 @@ type Props = {
   onDetected: (read: PlateRead) => void;
 };
 
+/** Sonido corto de confirmación cuando la placa queda leída. */
+function playBeep() {
+  try {
+    const Ctx = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+    osc.onended = () => void ctx.close();
+  } catch {
+    /* sin audio disponible */
+  }
+}
+
 /**
  * Escáner en vivo: abre la cámara y lee la placa continuamente,
  * sin necesidad de tomar una fotografía.
@@ -26,6 +48,8 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
 
     async function start() {
       try {
+        // Carga el motor OCR en paralelo con la cámara para que esté listo antes.
+        const workerPromise = createPlateWorker();
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
           audio: false,
@@ -38,7 +62,7 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
         }
         setReady(true);
         setStatus("Enfoca la placa dentro del recuadro…");
-        worker = await createPlateWorker();
+        worker = await workerPromise;
         if (cancelled) return;
         void loop();
       } catch {
@@ -51,16 +75,14 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (video && canvas && video.videoWidth > 0) {
-        // Recorta la franja central: allí queda la placa dentro de la guía.
-        const cw = Math.round(video.videoWidth * 0.8);
-        const ch = Math.round(video.videoHeight * 0.32);
-        const sx = Math.round((video.videoWidth - cw) / 2);
-        const sy = Math.round((video.videoHeight - ch) / 2);
+        // Recorta la franja central y la reduce: menos píxeles = lectura más rápida.
+        const cw = Math.round(video.videoWidth * 0.8 * 0.6);
+        const ch = Math.round(video.videoHeight * 0.32 * 0.6);
         canvas.width = cw;
         canvas.height = ch;
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.drawImage(video, sx, sy, cw, ch, 0, 0, cw, ch);
+          ctx.drawImage(video, video.videoWidth * 0.1, video.videoHeight * 0.34, video.videoWidth * 0.8, video.videoHeight * 0.32, 0, 0, cw, ch);
           // Aumenta contraste en escala de grises para mejorar la lectura.
           const img = ctx.getImageData(0, 0, cw, ch);
           const d = img.data;
@@ -77,6 +99,7 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
             if (cancelled) return;
             if (read.plate) {
               setStatus(`Placa detectada: ${read.plate}`);
+              playBeep();
               onDetected(read);
               onClose();
               return;
@@ -86,7 +109,8 @@ export function PlateScanner({ open, onClose, onDetected }: Props) {
           }
         }
       }
-      if (!cancelled) timer = setTimeout(() => void loop(), 400);
+      // Relanza de inmediato: el OCR ya toma su propio tiempo, sin espera extra.
+      if (!cancelled) timer = setTimeout(() => void loop(), 80);
     }
 
     void start();

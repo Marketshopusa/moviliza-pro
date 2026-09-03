@@ -65,6 +65,11 @@ export async function createPlateWorker(): Promise<MinimalWorker> {
   };
   await worker.setParameters?.({
     tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ",
+    // Modo "texto disperso": ideal para una placa dentro de la guía y mucho más rápido.
+    tessedit_pageseg_mode: "11",
+    // Sin diccionarios: las placas son alfanuméricas, así se acelera la lectura.
+    load_system_dawg: "0",
+    load_freq_dawg: "0",
   });
   return worker;
 }
