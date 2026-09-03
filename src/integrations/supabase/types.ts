@@ -193,6 +193,41 @@ export type Database = {
         }
         Relationships: []
       }
+      shift_assignments: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          shift_id: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          shift_id: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          shift_id?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_assignments_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "work_shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shifts: {
         Row: {
           created_at: string
@@ -361,6 +396,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      work_shifts: {
+        Row: {
+          created_at: string
+          end_time: string
+          id: string
+          name: string
+          start_time: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          end_time: string
+          id?: string
+          name: string
+          start_time: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          end_time?: string
+          id?: string
+          name?: string
+          start_time?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {

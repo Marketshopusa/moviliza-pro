@@ -40,6 +40,11 @@ type NoteRow = { id: string; driver_id: string; body: string; created_at: string
 
 type ShiftRow = { id: string; driver_id: string; started_at: string; ended_at: string | null };
 
+type WorkShift = { id: string; name: string; start_time: string; end_time: string };
+
+type Assignment = { id: string; shift_id: string; email: string; user_id: string | null };
+
+
 type LocRow = {
   user_id: string;
   latitude: number;
@@ -92,6 +97,25 @@ function PanelPage() {
   const [avatars, setAvatars] = useState<Record<string, string>>({});
   const [openDriver, setOpenDriver] = useState<string | null>(null);
   const [tab, setTab] = useState<string>(SHIFT_BLOCKS[0].id);
+  const [workShifts, setWorkShifts] = useState<WorkShift[]>([]);
+  const [assigns, setAssigns] = useState<Assignment[]>([]);
+  const [shiftMsg, setShiftMsg] = useState<string | null>(null);
+  const [newShift, setNewShift] = useState({ name: "", start: "18:00", end: "02:30" });
+  const [newEmail, setNewEmail] = useState<Record<string, string>>({});
+
+  const loadShifts = useCallback(async () => {
+    const [{ data: ws }, { data: sa }] = await Promise.all([
+      supabase.from("work_shifts").select("id, name, start_time, end_time").order("start_time"),
+      supabase.from("shift_assignments").select("id, shift_id, email, user_id"),
+    ]);
+    setWorkShifts((ws as WorkShift[]) ?? []);
+    setAssigns((sa as Assignment[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (isSupervisor) void loadShifts();
+  }, [isSupervisor, loadShifts]);
+
 
   useEffect(() => {
     if (!isSupervisor) return;
@@ -213,16 +237,25 @@ function PanelPage() {
     notes.forEach((n) => ids.add(n.driver_id));
     locs.forEach((l) => ids.add(l.user_id));
     users.forEach((u) => ids.add(u.id));
-    return [...ids].map((id) => ({
-      id,
-      name: names[id] ?? users.find((u) => u.id === id)?.full_name ?? "Conductor",
-      account: users.find((u) => u.id === id) ?? null,
-      movements: rows.filter((r) => r.driver_id === id),
-      notes: notes.filter((n) => n.driver_id === id),
-      shifts: shifts.filter((s) => s.driver_id === id),
-      loc: locs.find((l) => l.user_id === id) ?? null,
-    }));
-  }, [rows, notes, locs, users, shifts, names]);
+    return [...ids].map((id) => {
+      const account = users.find((u) => u.id === id) ?? null;
+      const assign =
+        assigns.find((a) => a.user_id === id) ??
+        assigns.find((a) => account?.email && a.email.toLowerCase() === account.email.toLowerCase()) ??
+        null;
+      return {
+        id,
+        name: names[id] ?? account?.full_name ?? "Conductor",
+        account,
+        assignedShift: assign ? (workShifts.find((w) => w.id === assign.shift_id) ?? null) : null,
+        movements: rows.filter((r) => r.driver_id === id),
+        notes: notes.filter((n) => n.driver_id === id),
+        shifts: shifts.filter((s) => s.driver_id === id),
+        loc: locs.find((l) => l.user_id === id) ?? null,
+      };
+    });
+  }, [rows, notes, locs, users, shifts, names, assigns, workShifts]);
+
 
   function exportCsv() {
     const header = ["numero", "fecha", "turno", "conductor", "estado", "placa", "modelo", "origen", "destino", "ubicacion"];
@@ -375,7 +408,127 @@ function PanelPage() {
         </div>
       </section>
 
+      {/* TURNOS (solo administradores) */}
+      {isAdmin && (
+        <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Turnos de trabajo ({workShifts.length})
+          </h2>
+
+          <div className="grid grid-cols-4 gap-2">
+            <input
+              placeholder="Nombre del turno"
+              value={newShift.name}
+              onChange={(e) => setNewShift({ ...newShift, name: e.target.value })}
+              className="col-span-2 bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+            />
+            <input
+              type="time"
+              aria-label="Hora de inicio"
+              value={newShift.start}
+              onChange={(e) => setNewShift({ ...newShift, start: e.target.value })}
+              className="bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+            />
+            <input
+              type="time"
+              aria-label="Hora de fin"
+              value={newShift.end}
+              onChange={(e) => setNewShift({ ...newShift, end: e.target.value })}
+              className="bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+            />
+            <button
+              onClick={async () => {
+                if (!newShift.name.trim()) return setShiftMsg("Escribe el nombre del turno");
+                const { error } = await supabase
+                  .from("work_shifts")
+                  .insert({ name: newShift.name.trim(), start_time: newShift.start, end_time: newShift.end });
+                setShiftMsg(error ? "No se pudo crear el turno" : "Turno creado");
+                if (!error) setNewShift({ name: "", start: "18:00", end: "02:30" });
+                void loadShifts();
+              }}
+              className="col-span-4 bg-primary text-primary-foreground font-bold py-2.5 rounded-lg uppercase text-[10px] tracking-widest"
+            >
+              Crear turno
+            </button>
+          </div>
+
+          {workShifts.map((w) => {
+            const list = assigns.filter((a) => a.shift_id === w.id);
+            return (
+              <div key={w.id} className="border border-border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold truncate">{w.name}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground">
+                      {w.start_time.slice(0, 5)} – {w.end_time.slice(0, 5)} · {list.length} drivers
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`¿Eliminar el turno ${w.name} y sus asignaciones?`)) return;
+                      const { error } = await supabase.from("work_shifts").delete().eq("id", w.id);
+                      setShiftMsg(error ? "No se pudo eliminar" : "Turno eliminado");
+                      void loadShifts();
+                    }}
+                    className="text-[10px] font-bold uppercase text-destructive shrink-0"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+
+                {list.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] truncate">
+                      {a.email}
+                      {a.user_id ? "" : " · pendiente de registro"}
+                    </p>
+                    <button
+                      onClick={async () => {
+                        await supabase.from("shift_assignments").delete().eq("id", a.id);
+                        void loadShifts();
+                      }}
+                      className="text-[10px] font-bold uppercase text-destructive shrink-0"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ))}
+
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    placeholder="correo@driver.com"
+                    aria-label={`Correo para ${w.name}`}
+                    value={newEmail[w.id] ?? ""}
+                    onChange={(e) => setNewEmail({ ...newEmail, [w.id]: e.target.value })}
+                    className="flex-1 bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+                  />
+                  <button
+                    onClick={async () => {
+                      const email = (newEmail[w.id] ?? "").trim().toLowerCase();
+                      if (!email) return;
+                      const match = users.find((u) => (u.email ?? "").toLowerCase() === email);
+                      const { error } = await supabase
+                        .from("shift_assignments")
+                        .upsert({ shift_id: w.id, email, user_id: match?.id ?? null }, { onConflict: "email" });
+                      setShiftMsg(error ? "No se pudo asignar el correo" : "Correo asignado");
+                      if (!error) setNewEmail({ ...newEmail, [w.id]: "" });
+                      void loadShifts();
+                    }}
+                    className="bg-panel text-panel-foreground font-bold px-3 rounded-lg uppercase text-[10px] tracking-widest"
+                  >
+                    Agregar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {shiftMsg && <p className="text-[10px] text-muted-foreground">{shiftMsg}</p>}
+        </section>
+      )}
+
       {/* TARJETA POR CONDUCTOR */}
+
       <section className="space-y-2">
         <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
           Conductores ({drivers.length})
@@ -396,35 +549,48 @@ function PanelPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold truncate">{d.name}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {d.movements.length} mov · {d.notes.length} notas
-                    {lastShift ? ` · ${hhmm(lastShift.started_at)}–${hhmm(lastShift.ended_at)}` : ""}
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {d.assignedShift?.name ?? "Sin turno asignado"} · {d.movements.length} mov · {d.notes.length} notas
                   </p>
                 </div>
-                {f && (
-                  <span
-                    className={`text-[10px] font-bold uppercase px-2 py-1 rounded border shrink-0 ${
-                      f.fresh && d.loc?.is_on_shift ? "text-primary border-primary/40" : "text-muted-foreground border-border"
-                    }`}
-                  >
-                    {d.loc?.is_on_shift ? f.label : "Fuera de turno"}
-                  </span>
-                )}
+
+                <span
+                  className={`text-[10px] font-bold uppercase px-2 py-1 rounded border shrink-0 ${
+                    f && f.fresh && d.loc?.is_on_shift
+                      ? "text-primary border-primary/40"
+                      : "text-muted-foreground border-border"
+                  }`}
+                >
+                  {d.loc?.is_on_shift ? (f?.label ?? "En línea") : "Desconectado"}
+                </span>
               </button>
 
               {open && (
                 <div className="border-t border-border p-3 space-y-4">
                   {/* Turnos */}
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Turnos</p>
-                    {d.shifts.length === 0 && <p className="text-xs text-muted-foreground">Sin turnos registrados.</p>}
-                    {d.shifts.slice(0, 5).map((s) => (
-                      <p key={s.id} className="text-[11px] font-mono">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Turno</p>
+                    <p className="text-xs font-semibold">{d.assignedShift?.name ?? "Sin turno asignado"}</p>
+                    {d.assignedShift && (
+                      <p className="text-[10px] text-muted-foreground font-mono">
+                        {d.assignedShift.start_time.slice(0, 5)} – {d.assignedShift.end_time.slice(0, 5)}
+                      </p>
+                    )}
+                    {lastShift ? (
+                      <p className="text-[11px] font-mono">
+                        Hoy · entrada {hhmm(lastShift.started_at)} · salida {hhmm(lastShift.ended_at)}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">Sin entradas registradas en el rango.</p>
+                    )}
+                    {d.shifts.slice(1, 5).map((s) => (
+                      <p key={s.id} className="text-[11px] font-mono text-muted-foreground">
                         {new Date(s.started_at).toLocaleDateString("es-US")} · entrada {hhmm(s.started_at)} · salida{" "}
                         {hhmm(s.ended_at)}
                       </p>
                     ))}
                   </div>
+
 
                   {/* GPS */}
                   <div className="space-y-1">
