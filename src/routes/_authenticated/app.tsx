@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { queueMovement, readPending, syncPending, uploadPhoto, type PhotoEntry, type SiteCode } from "@/lib/offline";
+import { PushToTalk } from "@/components/PushToTalk";
+
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({
