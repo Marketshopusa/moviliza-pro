@@ -2,6 +2,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type SiteCode = "X" | "A" | "B" | "C";
 
+export type PhotoEntry = { path: string; note: string };
+
 export type PendingMovement = {
   localId: string;
   driver_id: string;
@@ -11,12 +13,14 @@ export type PendingMovement = {
   vehicle_model: string | null;
   origin: SiteCode;
   destination: SiteCode;
+  dropoff_location: string | null;
   occurred_at: string;
   latitude: number | null;
   longitude: number | null;
   notes: string | null;
-  photoDataUrl: string | null;
+  photos: { dataUrl: string; note: string }[];
 };
+
 
 const KEY = "movpro.pending.v1";
 
