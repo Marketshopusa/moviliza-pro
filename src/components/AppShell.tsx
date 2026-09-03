@@ -1,13 +1,14 @@
 import { Link, Outlet } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const { profile, role, isSupervisor } = useAuth();
 
   return (
-    <div className="min-h-screen bg-background font-sans">
+    <div className={cn("min-h-screen font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
       <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border">
         <div className="mx-auto max-w-5xl px-4 h-14 flex items-center justify-between">
           <Link to="/" className="font-mono font-bold text-sm tracking-widest">
