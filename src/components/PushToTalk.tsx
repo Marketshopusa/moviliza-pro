@@ -16,6 +16,7 @@ export function PushToTalk() {
   const [pendingJoin, setPendingJoin] = useState<Channel | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const [speaking, setSpeaking] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newPass, setNewPass] = useState("");
