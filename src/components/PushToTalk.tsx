@@ -316,34 +316,74 @@ export function PushToTalk() {
               {visibleChannels.map((c) => {
                 const joined = memberIds.includes(c.id);
                 return (
-                  <li key={c.id} className="border border-border rounded-xl p-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm truncate">{c.name}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {c.is_admin_only ? "Solo administración" : "Turno"} · {joined ? "Con acceso" : "Requiere clave"}
-                      </p>
+                  <li key={c.id} className="border border-border rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm truncate">{c.name}</p>
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {c.is_admin_only ? "Solo administración" : "Turno"} · {joined ? "Con acceso" : "Requiere clave"}
+                        </p>
+                      </div>
+                      {joined ? (
+                        <button
+                          onClick={() => {
+                            setChannelId(c.id);
+                            setOpen(false);
+                          }}
+                          className={`text-[10px] font-bold uppercase px-3 py-2 rounded ${
+                            channelId === c.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
+                          }`}
+                        >
+                          {channelId === c.id ? "Activo" : "Usar"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setPendingJoin(c)}
+                          className="text-[10px] font-bold uppercase px-3 py-2 rounded bg-accent text-panel"
+                        >
+                          Entrar
+                        </button>
+                      )}
                     </div>
-                    {joined ? (
-                      <button
-                        onClick={() => {
-                          setChannelId(c.id);
-                          setOpen(false);
-                        }}
-                        className={`text-[10px] font-bold uppercase px-3 py-2 rounded ${
-                          channelId === c.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"
-                        }`}
-                      >
-                        {channelId === c.id ? "Activo" : "Usar"}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setPendingJoin(c)}
-                        className="text-[10px] font-bold uppercase px-3 py-2 rounded bg-accent text-panel"
-                      >
-                        Entrar
-                      </button>
+                    {isAdmin && (
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => {
+                            setManageId(manageId === c.id ? null : c.id);
+                            setManagePass("");
+                          }}
+                          className="text-[10px] font-bold uppercase text-primary"
+                        >
+                          Cambiar clave
+                        </button>
+                        <button
+                          onClick={() => void removeChannel(c.id, c.name)}
+                          className="text-[10px] font-bold uppercase text-destructive"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    )}
+                    {isAdmin && manageId === c.id && (
+                      <form onSubmit={changePasscode} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={managePass}
+                          onChange={(e) => setManagePass(e.target.value)}
+                          placeholder="Nueva clave (mín. 4)"
+                          className="flex-1 border border-border rounded-lg px-3 py-2 text-sm bg-background"
+                        />
+                        <button
+                          type="submit"
+                          disabled={managePass.trim().length < 4}
+                          className="bg-primary text-primary-foreground rounded-lg px-3 text-[10px] font-bold uppercase disabled:opacity-40"
+                        >
+                          Guardar
+                        </button>
+                      </form>
                     )}
                   </li>
+
                 );
               })}
             </ul>
