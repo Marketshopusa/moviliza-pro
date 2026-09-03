@@ -158,7 +158,57 @@ function DriverHome() {
     setPhotos((prev) => prev.map((p, i) => (i === index ? { ...p, note: value } : p)));
   }
 
+  // Registro interno de vehículos: al escribir/escanear la placa se autocompleta el modelo.
+  useEffect(() => {
+    const clean = plate.trim().toUpperCase().replace(/\s+/g, "");
+    if (clean.length < 4) return;
+    let active = true;
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from("vehicles")
+        .select("vehicle_model")
+        .eq("plate_state", plateState)
+        .eq("plate", clean)
+        .maybeSingle();
+      if (!active) return;
+      const known = data?.vehicle_model ?? "";
+      if (known) {
+        setModel((current) => (current.trim() ? current : known));
+        setModelFromRegistry(true);
+      } else {
+        setModelFromRegistry(false);
+      }
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [plate, plateState]);
+
+  async function scanPlate(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (scanRef.current) scanRef.current.value = "";
+    if (!file) return;
+    setScanning(true);
+    setScanMsg("Leyendo la placa…");
+    try {
+      const { scanPlateFromImage } = await import("@/lib/plate-ocr");
+      const detected = await scanPlateFromImage(file);
+      if (detected) {
+        setPlate(detected);
+        setScanMsg(`Placa detectada: ${detected}. Verifica antes de guardar.`);
+      } else {
+        setScanMsg("No se pudo leer la placa. Escríbela manualmente.");
+      }
+    } catch {
+      setScanMsg("No se pudo leer la placa. Escríbela manualmente.");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   function resetForm() {
+
     setPlate("");
     setModel("");
     setOrigin(null);
