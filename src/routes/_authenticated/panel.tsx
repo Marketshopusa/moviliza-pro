@@ -52,7 +52,12 @@ type LocRow = {
 };
 
 function PanelPage() {
-  const { isSupervisor, loading } = useAuth();
+  const { isSupervisor, isAdmin, loading, user } = useAuth();
+  const fetchUsers = useServerFn(listUsers);
+  const removeUser = useServerFn(deleteUser);
+  const changeRole = useServerFn(setUserRole);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [userMsg, setUserMsg] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
