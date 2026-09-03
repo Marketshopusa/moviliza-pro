@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { freshnessLabel } from "@/lib/geo";
 import type { SiteCode } from "@/lib/offline";
+import { deleteUser, listUsers, setUserRole, type ManagedUser } from "@/lib/admin.functions";
 
 export const Route = createFileRoute("/_authenticated/panel")({
   head: () => ({
