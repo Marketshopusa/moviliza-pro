@@ -56,6 +56,27 @@ function PanelPage() {
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
   const [busy, setBusy] = useState(false);
+  const [locs, setLocs] = useState<LocRow[]>([]);
+  const [avatars, setAvatars] = useState<Record<string, string>>({});
+  const [focus, setFocus] = useState<LocRow | null>(null);
+
+  useEffect(() => {
+    if (!isSupervisor) return;
+    let active = true;
+    async function load() {
+      const { data } = await supabase
+        .from("driver_locations")
+        .select("user_id, latitude, longitude, accuracy, is_on_shift, recorded_at")
+        .order("recorded_at", { ascending: false });
+      if (active) setLocs((data as LocRow[]) ?? []);
+    }
+    void load();
+    const t = setInterval(() => void load(), 30_000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [isSupervisor]);
 
   useEffect(() => {
     if (!isSupervisor) return;
