@@ -434,30 +434,43 @@ function PanelPage() {
                   </p>
                 </div>
 
-                {f && (
-                  <span
-                    className={`text-[10px] font-bold uppercase px-2 py-1 rounded border shrink-0 ${
-                      f.fresh && d.loc?.is_on_shift ? "text-primary border-primary/40" : "text-muted-foreground border-border"
-                    }`}
-                  >
-                    {d.loc?.is_on_shift ? f.label : "Fuera de turno"}
-                  </span>
-                )}
+                <span
+                  className={`text-[10px] font-bold uppercase px-2 py-1 rounded border shrink-0 ${
+                    f && f.fresh && d.loc?.is_on_shift
+                      ? "text-primary border-primary/40"
+                      : "text-muted-foreground border-border"
+                  }`}
+                >
+                  {d.loc?.is_on_shift ? (f?.label ?? "En línea") : "Desconectado"}
+                </span>
               </button>
 
               {open && (
                 <div className="border-t border-border p-3 space-y-4">
                   {/* Turnos */}
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Turnos</p>
-                    {d.shifts.length === 0 && <p className="text-xs text-muted-foreground">Sin turnos registrados.</p>}
-                    {d.shifts.slice(0, 5).map((s) => (
-                      <p key={s.id} className="text-[11px] font-mono">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Turno</p>
+                    <p className="text-xs font-semibold">{d.assignedShift?.name ?? "Sin turno asignado"}</p>
+                    {d.assignedShift && (
+                      <p className="text-[10px] text-muted-foreground font-mono">
+                        {d.assignedShift.start_time.slice(0, 5)} – {d.assignedShift.end_time.slice(0, 5)}
+                      </p>
+                    )}
+                    {lastShift ? (
+                      <p className="text-[11px] font-mono">
+                        Hoy · entrada {hhmm(lastShift.started_at)} · salida {hhmm(lastShift.ended_at)}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">Sin entradas registradas en el rango.</p>
+                    )}
+                    {d.shifts.slice(1, 5).map((s) => (
+                      <p key={s.id} className="text-[11px] font-mono text-muted-foreground">
                         {new Date(s.started_at).toLocaleDateString("es-US")} · entrada {hhmm(s.started_at)} · salida{" "}
                         {hhmm(s.ended_at)}
                       </p>
                     ))}
                   </div>
+
 
                   {/* GPS */}
                   <div className="space-y-1">
