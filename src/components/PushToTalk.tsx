@@ -155,6 +155,18 @@ export function PushToTalk() {
     }
     playingRef.current = true;
     setSpeaking(next.who);
+    if (typeof navigator !== "undefined" && "mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: `Habla ${next.who}`,
+          artist: "MOVILIZA-PRO · Walkie-talkie",
+        });
+        navigator.mediaSession.playbackState = "playing";
+      } catch {
+        /* sin soporte */
+      }
+    }
+
     const audio = getAudioEl();
     if (!audio) return;
     audio.onended = () => playNext();
