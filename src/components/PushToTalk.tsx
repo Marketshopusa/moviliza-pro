@@ -5,6 +5,9 @@ import { useAuth } from "@/lib/auth";
 type Channel = { id: string; name: string; is_admin_only: boolean };
 
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
+const SILENCE =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+
 
 export function PushToTalk() {
   const { user, isSupervisor, isAdmin, profile } = useAuth();
@@ -31,6 +34,7 @@ export function PushToTalk() {
   const playingRef = useRef(false);
   const namesRef = useRef<Record<string, string>>({});
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const keepAliveRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
   const [needsUnlock, setNeedsUnlock] = useState(false);
 
@@ -46,30 +50,67 @@ export function PushToTalk() {
     return audioElRef.current;
   }, []);
 
+  // Pista silenciosa en bucle: mantiene viva la sesión de audio del navegador
+  // aunque el usuario salga de la app, para que las transmisiones se sigan oyendo.
+  const startKeepAlive = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    if (!keepAliveRef.current) {
+      const el = new Audio(SILENCE);
+      el.loop = true;
+      el.volume = 0.0001;
+      el.setAttribute("playsinline", "true");
+      keepAliveRef.current = el;
+    }
+    try {
+      await keepAliveRef.current.play();
+    } catch {
+      /* se reintenta con el próximo gesto */
+    }
+  }, []);
+
   const unlockAudio = useCallback(async () => {
     const el = getAudioEl();
-    if (!el || unlockedRef.current) return;
+    if (!el || unlockedRef.current) {
+      void startKeepAlive();
+      return;
+    }
     try {
       el.muted = true;
-      el.src =
-        "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+      el.src = SILENCE;
       await el.play();
       el.pause();
       el.currentTime = 0;
       el.muted = false;
       unlockedRef.current = true;
       setNeedsUnlock(false);
+      void startKeepAlive();
     } catch {
       setNeedsUnlock(true);
     }
-  }, [getAudioEl]);
+  }, [getAudioEl, startKeepAlive]);
 
   // Cualquier toque en la pantalla habilita la reproducción de audio entrante.
   useEffect(() => {
     const handler = () => void unlockAudio();
     window.addEventListener("pointerdown", handler, { once: false });
-    return () => window.removeEventListener("pointerdown", handler);
-  }, [unlockAudio]);
+    const revive = () => {
+      if (unlockedRef.current) void startKeepAlive();
+    };
+    document.addEventListener("visibilitychange", revive);
+    return () => {
+      window.removeEventListener("pointerdown", handler);
+      document.removeEventListener("visibilitychange", revive);
+    };
+  }, [unlockAudio, startKeepAlive]);
+
+  // Detiene la pista silenciosa al desmontar (cierre de sesión / salida).
+  useEffect(() => {
+    return () => {
+      keepAliveRef.current?.pause();
+      keepAliveRef.current = null;
+    };
+  }, []);
+
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
   const isMember = channelId ? memberIds.includes(channelId) : false;
@@ -114,6 +155,18 @@ export function PushToTalk() {
     }
     playingRef.current = true;
     setSpeaking(next.who);
+    if (typeof navigator !== "undefined" && "mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: `Habla ${next.who}`,
+          artist: "MOVILIZA-PRO · Walkie-talkie",
+        });
+        navigator.mediaSession.playbackState = "playing";
+      } catch {
+        /* sin soporte */
+      }
+    }
+
     const audio = getAudioEl();
     if (!audio) return;
     audio.onended = () => playNext();
