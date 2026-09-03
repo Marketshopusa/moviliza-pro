@@ -60,12 +60,16 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-background-admin: var(--background-admin);
+  --color-ptt: var(--ptt);
+  --color-ptt-live: var(--ptt-live);
 }
 
 :root {
   --radius: 0.625rem;
   --background: oklch(0.96 0.02 240);
   --background-admin: oklch(0.91 0.03 240);
+  --ptt: oklch(0.72 0.19 55);
+  --ptt-live: oklch(0.68 0.19 155);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.129 0.042 264.695);
