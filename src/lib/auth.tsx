@@ -9,6 +9,7 @@ export type Profile = {
   full_name: string;
   initials: string;
   phone: string | null;
+  avatar_url: string | null;
 };
 
 type AuthState = {
