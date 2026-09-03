@@ -221,6 +221,41 @@ function PanelPage() {
       </div>
 
       <section className="space-y-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+          Notas privadas de conductores
+          {notes.length > 0 && (
+            <span className="bg-accent text-accent-foreground rounded px-1.5 py-0.5 font-mono">{notes.length}</span>
+          )}
+        </h2>
+        {notes.map((n) => (
+          <div key={n.id} className="bg-card p-3 rounded-lg border border-accent/50 space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="size-7 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-[9px] font-mono font-bold shrink-0">
+                {avatars[n.driver_id] ? (
+                  <img
+                    src={avatars[n.driver_id]}
+                    alt={`Foto de ${names[n.driver_id] ?? "conductor"}`}
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  (names[n.driver_id] ?? "?").slice(0, 2).toUpperCase()
+                )}
+              </div>
+              <p className="text-[10px] font-bold uppercase text-muted-foreground">
+                {names[n.driver_id] ?? "Conductor"} • {new Date(n.created_at).toLocaleString("es-US")}
+              </p>
+            </div>
+            <p className="text-xs whitespace-pre-wrap">{n.body}</p>
+          </div>
+        ))}
+        {notes.length === 0 && !busy && (
+          <p className="text-xs text-muted-foreground">Sin notas de conductores en los últimos 30 días.</p>
+        )}
+      </section>
+
+
+
+      <section className="space-y-2">
         <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
           GPS de conductores (solo administración)
         </h2>
