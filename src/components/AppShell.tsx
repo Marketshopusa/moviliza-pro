@@ -14,9 +14,19 @@ export function AppShell({ children }: { children?: ReactNode }) {
             MOVILIZA<span className="text-primary">PRO</span>
           </Link>
           <div className="flex items-center gap-3">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
-              {role}
-            </span>
+            {isSupervisor ? (
+              <Link
+                to="/panel"
+                className="text-[10px] font-bold uppercase tracking-widest text-primary border border-primary/40 rounded px-2 py-1"
+              >
+                {role}
+              </Link>
+            ) : (
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
+                {role}
+              </span>
+            )}
+
             <div className="size-8 rounded bg-panel text-panel-foreground grid place-items-center text-xs font-mono font-bold">
               {profile?.initials ?? "?"}
             </div>
