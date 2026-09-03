@@ -343,6 +343,15 @@ export function PushToTalk() {
                 ? "Mantén presionado para hablar"
                 : "Ingresa la clave del canal"}
         </p>
+        {needsUnlock && (
+          <button
+            type="button"
+            onClick={() => void unlockAudio()}
+            className="mt-1 text-[9px] font-bold uppercase tracking-wider bg-ptt text-white rounded px-2 py-1"
+          >
+            Activar audio
+          </button>
+        )}
       </div>
 
       {open && (
