@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { freshnessLabel } from "@/lib/geo";
 import type { SiteCode } from "@/lib/offline";
 
 export const Route = createFileRoute("/_authenticated/panel")({
@@ -39,6 +40,15 @@ function todayISO() {
 
 type NoteRow = { id: string; driver_id: string; body: string; created_at: string };
 
+type LocRow = {
+  user_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  is_on_shift: boolean;
+  recorded_at: string;
+};
+
 function PanelPage() {
   const { isSupervisor, loading } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
@@ -47,6 +57,27 @@ function PanelPage() {
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
   const [busy, setBusy] = useState(false);
+  const [locs, setLocs] = useState<LocRow[]>([]);
+  const [avatars, setAvatars] = useState<Record<string, string>>({});
+  const [focus, setFocus] = useState<LocRow | null>(null);
+
+  useEffect(() => {
+    if (!isSupervisor) return;
+    let active = true;
+    async function load() {
+      const { data } = await supabase
+        .from("driver_locations")
+        .select("user_id, latitude, longitude, accuracy, is_on_shift, recorded_at")
+        .order("recorded_at", { ascending: false });
+      if (active) setLocs((data as LocRow[]) ?? []);
+    }
+    void load();
+    const t = setInterval(() => void load(), 30_000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [isSupervisor]);
 
   useEffect(() => {
     if (!isSupervisor) return;
@@ -65,7 +96,7 @@ function PanelPage() {
           .lte("occurred_at", end)
           .order("occurred_at", { ascending: false })
           .limit(1000),
-        supabase.from("profiles").select("id, full_name, initials"),
+        supabase.from("profiles").select("id, full_name, initials, avatar_url"),
         supabase
           .from("driver_notes")
           .select("id, driver_id, body, created_at")
@@ -78,11 +109,25 @@ function PanelPage() {
       setRows((m as Row[]) ?? []);
       setNotes((n as NoteRow[]) ?? []);
       const map: Record<string, string> = {};
-      for (const row of (p as { id: string; full_name: string; initials: string }[]) ?? []) {
+      const profs = (p as { id: string; full_name: string; initials: string; avatar_url: string | null }[]) ?? [];
+      for (const row of profs) {
         map[row.id] = row.full_name || row.initials;
       }
       setNames(map);
       setBusy(false);
+      const withAvatar = profs.filter((r) => r.avatar_url);
+      if (withAvatar.length > 0) {
+        const { data: signed } = await supabase.storage
+          .from("driver-avatars")
+          .createSignedUrls(withAvatar.map((r) => r.avatar_url as string), 3600);
+        if (!active) return;
+        const amap: Record<string, string> = {};
+        (signed ?? []).forEach((s, i) => {
+          const owner = withAvatar[i];
+          if (owner && s.signedUrl) amap[owner.id] = s.signedUrl;
+        });
+        setAvatars(amap);
+      }
     })();
     return () => {
       active = false;
@@ -173,6 +218,73 @@ function PanelPage() {
           Exportar CSV ({rows.length})
         </button>
       </div>
+
+      <section className="space-y-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          GPS de conductores (solo administración)
+        </h2>
+        {locs.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Aún no hay ubicaciones. El GPS se activa en el teléfono del conductor al iniciar sesión.
+          </p>
+        )}
+        {locs.map((l) => {
+          const f = freshnessLabel(l.recorded_at);
+          return (
+            <button
+              key={l.user_id}
+              onClick={() => setFocus(focus?.user_id === l.user_id ? null : l)}
+              className="w-full text-left bg-card border border-border rounded-lg p-3 flex items-center gap-3"
+            >
+              <div className="size-9 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-[10px] font-mono font-bold shrink-0">
+                {avatars[l.user_id] ? (
+                  <img
+                    src={avatars[l.user_id]}
+                    alt={`Foto de ${names[l.user_id] ?? "conductor"}`}
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  (names[l.user_id] ?? "?").slice(0, 2).toUpperCase()
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold truncate">{names[l.user_id] ?? "Conductor"}</p>
+                <p className="text-[10px] text-muted-foreground font-mono">
+                  {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)}
+                  {l.accuracy ? ` · ±${Math.round(l.accuracy)} m` : ""}
+                </p>
+              </div>
+              <span
+                className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border ${
+                  f.fresh && l.is_on_shift
+                    ? "text-primary border-primary/40"
+                    : "text-muted-foreground border-border"
+                }`}
+              >
+                {l.is_on_shift ? f.label : "Fuera de turno"}
+              </span>
+            </button>
+          );
+        })}
+        {focus && (
+          <div className="rounded-xl overflow-hidden border border-border">
+            <iframe
+              title={`Mapa de ${names[focus.user_id] ?? "conductor"}`}
+              className="w-full h-64"
+              loading="lazy"
+              src={`https://www.openstreetmap.org/export/embed.html?bbox=${focus.longitude - 0.005}%2C${focus.latitude - 0.004}%2C${focus.longitude + 0.005}%2C${focus.latitude + 0.004}&layer=mapnik&marker=${focus.latitude}%2C${focus.longitude}`}
+            />
+            <a
+              href={`https://www.google.com/maps?q=${focus.latitude},${focus.longitude}`}
+              target="_blank"
+              rel="noreferrer"
+              className="block bg-card p-2 text-center text-[10px] font-bold uppercase tracking-widest text-primary"
+            >
+              Abrir en Google Maps
+            </a>
+          </div>
+        )}
+      </section>
 
       <div className="bg-panel text-panel-foreground rounded-xl p-4 grid grid-cols-4 gap-3">
         {(Object.keys(SITE_LABEL) as SiteCode[]).map((s) => (

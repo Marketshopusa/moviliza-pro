@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      driver_locations: {
+        Row: {
+          accuracy: number | null
+          created_at: string
+          is_on_shift: boolean
+          latitude: number
+          longitude: number
+          recorded_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accuracy?: number | null
+          created_at?: string
+          is_on_shift?: boolean
+          latitude: number
+          longitude: number
+          recorded_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accuracy?: number | null
+          created_at?: string
+          is_on_shift?: boolean
+          latitude?: number
+          longitude?: number
+          recorded_at?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       driver_notes: {
         Row: {
           body: string
@@ -132,6 +165,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_url: string | null
           created_at: string
           full_name: string
           id: string
@@ -140,6 +174,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
           full_name?: string
           id: string
@@ -148,6 +183,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
           full_name?: string
           id?: string
