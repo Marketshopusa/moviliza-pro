@@ -53,6 +53,12 @@ export function PushToTalk() {
     void load();
   }, [load]);
 
+  // Refresca la lista cada vez que se abre el selector de canales,
+  // para ver canales creados desde otros dispositivos.
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
   useEffect(() => {
     if (channelId && typeof window !== "undefined") window.localStorage.setItem(LAST_CHANNEL_KEY, channelId);
   }, [channelId]);
