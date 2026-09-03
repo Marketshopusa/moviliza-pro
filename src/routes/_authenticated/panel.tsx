@@ -11,7 +11,7 @@ export const Route = createFileRoute("/_authenticated/panel")({
   head: () => ({
     meta: [
       { title: "Panel de supervisión · MovilizaPro" },
-      { name: "description", content: "Totales por conductor, terminal y ruta con exportación CSV." },
+      { name: "description", content: "Totales por conductor, terminal y turno con exportación CSV y PDF." },
       { property: "og:title", content: "Panel de supervisión · MovilizaPro" },
       { property: "og:description", content: "Control operativo de movimientos entre Base X y terminales A, B y C." },
       { property: "og:type", content: "website" },
@@ -36,11 +36,9 @@ type Row = {
   occurred_at: string;
 };
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 type NoteRow = { id: string; driver_id: string; body: string; created_at: string };
+
+type ShiftRow = { id: string; driver_id: string; started_at: string; ended_at: string | null };
 
 type LocRow = {
   user_id: string;
@@ -51,6 +49,31 @@ type LocRow = {
   recorded_at: string;
 };
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Bloques horarios operativos. Un movimiento pertenece al bloque según su hora local. */
+const SHIFT_BLOCKS = [
+  { id: "noche", label: "TURNO 6:PM - 2:30AM", start: 18 * 60, end: 2 * 60 + 30 },
+  { id: "madrugada", label: "TURNO 2:30AM - 10:00AM", start: 2 * 60 + 30, end: 10 * 60 },
+  { id: "dia", label: "TURNO 10:00AM - 6:00PM", start: 10 * 60, end: 18 * 60 },
+] as const;
+
+function blockOf(iso: string): (typeof SHIFT_BLOCKS)[number]["id"] {
+  const d = new Date(iso);
+  const mins = d.getHours() * 60 + d.getMinutes();
+  for (const b of SHIFT_BLOCKS) {
+    const inBlock = b.start < b.end ? mins >= b.start && mins < b.end : mins >= b.start || mins < b.end;
+    if (inBlock) return b.id;
+  }
+  return "dia";
+}
+
+function hhmm(iso: string | null) {
+  return iso ? new Date(iso).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" }) : "—";
+}
+
 function PanelPage() {
   const { isSupervisor, isAdmin, loading, user } = useAuth();
   const fetchUsers = useServerFn(listUsers);
@@ -60,13 +83,15 @@ function PanelPage() {
   const [userMsg, setUserMsg] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
+  const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
   const [busy, setBusy] = useState(false);
   const [locs, setLocs] = useState<LocRow[]>([]);
   const [avatars, setAvatars] = useState<Record<string, string>>({});
-  const [focus, setFocus] = useState<LocRow | null>(null);
+  const [openDriver, setOpenDriver] = useState<string | null>(null);
+  const [tab, setTab] = useState<string>(SHIFT_BLOCKS[0].id);
 
   useEffect(() => {
     if (!isSupervisor) return;
@@ -93,7 +118,7 @@ function PanelPage() {
     void (async () => {
       const start = new Date(`${from}T00:00:00`).toISOString();
       const end = new Date(`${to}T23:59:59`).toISOString();
-      const [{ data: m }, { data: p }, { data: n }] = await Promise.all([
+      const [{ data: m }, { data: p }, { data: n }, { data: s }] = await Promise.all([
         supabase
           .from("movements")
           .select(
@@ -111,11 +136,18 @@ function PanelPage() {
           .lte("created_at", end)
           .order("created_at", { ascending: false })
           .limit(200),
-
+        supabase
+          .from("shifts")
+          .select("id, driver_id, started_at, ended_at")
+          .gte("started_at", new Date(new Date(start).getTime() - 86400_000).toISOString())
+          .lte("started_at", end)
+          .order("started_at", { ascending: false })
+          .limit(500),
       ]);
       if (!active) return;
       setRows((m as Row[]) ?? []);
       setNotes((n as NoteRow[]) ?? []);
+      setShifts((s as ShiftRow[]) ?? []);
       const map: Record<string, string> = {};
       const profs = (p as { id: string; full_name: string; initials: string; avatar_url: string | null }[]) ?? [];
       for (const row of profs) {
@@ -130,9 +162,9 @@ function PanelPage() {
           .createSignedUrls(withAvatar.map((r) => r.avatar_url as string), 3600);
         if (!active) return;
         const amap: Record<string, string> = {};
-        (signed ?? []).forEach((s, i) => {
+        (signed ?? []).forEach((s2, i) => {
           const owner = withAvatar[i];
-          if (owner && s.signedUrl) amap[owner.id] = s.signedUrl;
+          if (owner && s2.signedUrl) amap[owner.id] = s2.signedUrl;
         });
         setAvatars(amap);
       }
@@ -141,7 +173,6 @@ function PanelPage() {
       active = false;
     };
   }, [isSupervisor, from, to]);
-
 
   const loadUsers = useCallback(async () => {
     if (!isAdmin) return;
@@ -156,28 +187,50 @@ function PanelPage() {
     void loadUsers();
   }, [loadUsers]);
 
-  const stats = useMemo(() => {
-    const byDriver = new Map<string, number>();
-    const bySite: Record<SiteCode, { in: number; out: number }> = {
-      X: { in: 0, out: 0 },
-      A: { in: 0, out: 0 },
-      B: { in: 0, out: 0 },
-      C: { in: 0, out: 0 },
-    };
+  const totals = useMemo(() => {
+    const out: Record<"A" | "B" | "C", number> = { A: 0, B: 0, C: 0 };
+    const back: Record<"A" | "B" | "C", number> = { A: 0, B: 0, C: 0 };
+    let internal = 0;
     for (const r of rows) {
-      byDriver.set(r.driver_id, (byDriver.get(r.driver_id) ?? 0) + 1);
-      bySite[r.destination].in += 1;
-      bySite[r.origin].out += 1;
+      if (r.origin === "X" && r.destination !== "X") out[r.destination as "A" | "B" | "C"] += 1;
+      else if (r.destination === "X" && r.origin !== "X") back[r.origin as "A" | "B" | "C"] += 1;
+      else internal += 1;
     }
-    return { byDriver: [...byDriver.entries()].sort((a, b) => b[1] - a[1]), bySite };
+    return { out, back, internal, total: rows.length };
   }, [rows]);
 
+  const byBlock = useMemo(() => {
+    const map: Record<string, Row[]> = {};
+    for (const b of SHIFT_BLOCKS) map[b.id] = [];
+    for (const r of rows) (map[blockOf(r.occurred_at)] ??= []).push(r);
+    return map;
+  }, [rows]);
+
+  /** Conductores con actividad o cuenta registrada. */
+  const drivers = useMemo(() => {
+    const ids = new Set<string>();
+    rows.forEach((r) => ids.add(r.driver_id));
+    notes.forEach((n) => ids.add(n.driver_id));
+    locs.forEach((l) => ids.add(l.user_id));
+    users.forEach((u) => ids.add(u.id));
+    return [...ids].map((id) => ({
+      id,
+      name: names[id] ?? users.find((u) => u.id === id)?.full_name ?? "Conductor",
+      account: users.find((u) => u.id === id) ?? null,
+      movements: rows.filter((r) => r.driver_id === id),
+      notes: notes.filter((n) => n.driver_id === id),
+      shifts: shifts.filter((s) => s.driver_id === id),
+      loc: locs.find((l) => l.user_id === id) ?? null,
+    }));
+  }, [rows, notes, locs, users, shifts, names]);
+
   function exportCsv() {
-    const header = ["numero", "fecha", "conductor", "estado", "placa", "modelo", "origen", "destino", "ubicacion"];
+    const header = ["numero", "fecha", "turno", "conductor", "estado", "placa", "modelo", "origen", "destino", "ubicacion"];
     const lines = rows.map((r) =>
       [
         r.movement_number,
         new Date(r.occurred_at).toLocaleString("es-US"),
+        SHIFT_BLOCKS.find((b) => b.id === blockOf(r.occurred_at))?.label ?? "",
         names[r.driver_id] ?? r.driver_id,
         r.plate_state,
         r.plate,
@@ -196,6 +249,10 @@ function PanelPage() {
     a.download = `movimientos_${from}_${to}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportPdf() {
+    window.print();
   }
 
   if (loading) return <p className="text-xs text-muted-foreground">Cargando…</p>;
@@ -239,215 +296,250 @@ function PanelPage() {
         <button
           onClick={exportCsv}
           disabled={rows.length === 0}
-          className="col-span-2 bg-primary disabled:opacity-50 text-primary-foreground font-bold py-3 rounded-lg uppercase text-xs tracking-widest"
+          className="bg-primary disabled:opacity-50 text-primary-foreground font-bold py-3 rounded-lg uppercase text-xs tracking-widest"
         >
-          Exportar CSV ({rows.length})
+          CSV ({rows.length})
+        </button>
+        <button
+          onClick={exportPdf}
+          disabled={rows.length === 0}
+          className="bg-panel disabled:opacity-50 text-panel-foreground font-bold py-3 rounded-lg uppercase text-xs tracking-widest"
+        >
+          PDF
         </button>
       </div>
 
-      {isAdmin && (
-        <section className="space-y-2">
-          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            Usuarios de la plataforma ({users.length})
-          </h2>
-          {users.map((u) => (
-            <div key={u.id} className="bg-card border border-border rounded-lg p-3 flex items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold truncate">{u.full_name || u.email || u.id}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{u.email}</p>
-              </div>
-              <select
-                value={u.role}
-                aria-label={`Rol de ${u.full_name || u.email}`}
-                onChange={async (e) => {
-                  const role = e.target.value as "conductor" | "supervisor" | "administrador";
-                  try {
-                    await changeRole({ data: { userId: u.id, role } });
-                    setUserMsg("Rol actualizado");
-                    void loadUsers();
-                  } catch {
-                    setUserMsg("No se pudo cambiar el rol");
-                  }
-                }}
-                className="bg-secondary border border-border rounded px-2 py-1 text-[10px] font-bold uppercase"
-              >
-                <option value="conductor">Driver</option>
-                <option value="supervisor">Supervisor</option>
-                <option value="administrador">Admin</option>
-              </select>
-              <button
-                disabled={u.id === user?.id}
-                onClick={async () => {
-                  if (!window.confirm(`¿Eliminar definitivamente la cuenta de ${u.full_name || u.email}?`)) return;
-                  try {
-                    await removeUser({ data: { userId: u.id } });
-                    setUserMsg("Cuenta eliminada");
-                    void loadUsers();
-                  } catch {
-                    setUserMsg("No se pudo eliminar la cuenta");
-                  }
-                }}
-                className="text-[10px] font-bold uppercase text-destructive disabled:opacity-30"
-              >
-                Eliminar
-              </button>
-            </div>
-          ))}
-          {userMsg && <p className="text-[10px] text-muted-foreground">{userMsg}</p>}
-        </section>
-      )}
-
-
-
-      <section className="space-y-2">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-          Notas privadas de conductores
-          {notes.length > 0 && (
-            <span className="bg-accent text-accent-foreground rounded px-1.5 py-0.5 font-mono">{notes.length}</span>
-          )}
+      {/* MOVIMIENTOS GENERALES POR TURNO */}
+      <section className="bg-card border border-border rounded-xl overflow-hidden">
+        <h2 className="px-4 pt-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          Movimientos generales
         </h2>
-        {notes.map((n) => (
-          <div key={n.id} className="bg-card p-3 rounded-lg border border-accent/50 space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="size-7 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-[9px] font-mono font-bold shrink-0">
-                {avatars[n.driver_id] ? (
-                  <img
-                    src={avatars[n.driver_id]}
-                    alt={`Foto de ${names[n.driver_id] ?? "conductor"}`}
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  (names[n.driver_id] ?? "?").slice(0, 2).toUpperCase()
-                )}
-              </div>
-              <p className="text-[10px] font-bold uppercase text-muted-foreground">
-                {names[n.driver_id] ?? "Conductor"} • {new Date(n.created_at).toLocaleString("es-US")}
-              </p>
-            </div>
-            <p className="text-xs whitespace-pre-wrap">{n.body}</p>
-          </div>
-        ))}
-        {notes.length === 0 && !busy && (
-          <p className="text-xs text-muted-foreground">Sin notas de conductores en los últimos 30 días.</p>
-        )}
-      </section>
-
-
-
-      <section className="space-y-2">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-          GPS de conductores (solo administración)
-        </h2>
-        {locs.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            Aún no hay ubicaciones. El GPS se activa en el teléfono del conductor al iniciar sesión.
-          </p>
-        )}
-        {locs.map((l) => {
-          const f = freshnessLabel(l.recorded_at);
-          return (
+        <div className="flex gap-1 p-3 overflow-x-auto">
+          {SHIFT_BLOCKS.map((b) => (
             <button
-              key={l.user_id}
-              onClick={() => setFocus(focus?.user_id === l.user_id ? null : l)}
-              className="w-full text-left bg-card border border-border rounded-lg p-3 flex items-center gap-3"
+              key={b.id}
+              onClick={() => setTab(b.id)}
+              className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2.5 py-2 rounded-lg border ${
+                tab === b.id
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-secondary text-muted-foreground border-border"
+              }`}
             >
-              <div className="size-9 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-[10px] font-mono font-bold shrink-0">
-                {avatars[l.user_id] ? (
-                  <img
-                    src={avatars[l.user_id]}
-                    alt={`Foto de ${names[l.user_id] ?? "conductor"}`}
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  (names[l.user_id] ?? "?").slice(0, 2).toUpperCase()
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold truncate">{names[l.user_id] ?? "Conductor"}</p>
-                <p className="text-[10px] text-muted-foreground font-mono">
-                  {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)}
-                  {l.accuracy ? ` · ±${Math.round(l.accuracy)} m` : ""}
+              {b.label} ({byBlock[b.id]?.length ?? 0})
+            </button>
+          ))}
+        </div>
+        <div className="px-3 pb-3 space-y-2">
+          {(byBlock[tab] ?? []).slice(0, 100).map((m) => (
+            <div key={m.id} className="bg-secondary p-3 rounded-lg border border-border flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-bold font-mono">
+                  #{String(m.movement_number).padStart(3, "0")} · {m.plate_state}-{m.plate}
+                </p>
+                <p className="text-[10px] text-muted-foreground truncate">
+                  {names[m.driver_id] ?? "Conductor"} • {new Date(m.occurred_at).toLocaleString("es-US")}
+                  {m.dropoff_location ? ` • ${m.dropoff_location}` : ""}
                 </p>
               </div>
-              <span
-                className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border ${
-                  f.fresh && l.is_on_shift
-                    ? "text-primary border-primary/40"
-                    : "text-muted-foreground border-border"
-                }`}
-              >
-                {l.is_on_shift ? f.label : "Fuera de turno"}
-              </span>
-            </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] font-bold text-muted-foreground">{SITE_LABEL[m.origin]}</span>
+                <span className="text-border">→</span>
+                <span className="text-[10px] font-bold text-primary">{SITE_LABEL[m.destination]}</span>
+              </div>
+            </div>
+          ))}
+          {(byBlock[tab]?.length ?? 0) === 0 && !busy && (
+            <p className="text-xs text-muted-foreground">Sin movimientos en este turno.</p>
+          )}
+        </div>
+      </section>
+
+      {/* MOVIMIENTOS DIARIOS GENERALES */}
+      <section className="bg-panel text-panel-foreground rounded-xl p-4 space-y-3">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-panel-foreground/60">
+          Movimientos diarios generales
+        </h2>
+        <div className="grid grid-cols-3 gap-3">
+          {(["A", "B", "C"] as const).map((t) => (
+            <div key={t} className="space-y-0.5">
+              <p className="text-[10px] uppercase text-panel-foreground/50">TERM {t}</p>
+              <p className="font-mono text-sm font-bold">Salidas ↑{totals.out[t]}</p>
+              <p className="font-mono text-sm font-bold">Retornos ↓{totals.back[t]}</p>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest border-t border-panel-foreground/20 pt-2">
+          <span>Salidas base {totals.out.A + totals.out.B + totals.out.C}</span>
+          <span>Retornos base {totals.back.A + totals.back.B + totals.back.C}</span>
+          <span>Total {totals.total}</span>
+        </div>
+      </section>
+
+      {/* TARJETA POR CONDUCTOR */}
+      <section className="space-y-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          Conductores ({drivers.length})
+        </h2>
+        {drivers.map((d) => {
+          const open = openDriver === d.id;
+          const f = d.loc ? freshnessLabel(d.loc.recorded_at) : null;
+          const lastShift = d.shifts[0];
+          return (
+            <div key={d.id} className="bg-card border border-border rounded-xl overflow-hidden">
+              <button onClick={() => setOpenDriver(open ? null : d.id)} className="w-full text-left p-3 flex items-center gap-3">
+                <div className="size-10 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-[10px] font-mono font-bold shrink-0">
+                  {avatars[d.id] ? (
+                    <img src={avatars[d.id]} alt={`Foto de ${d.name}`} className="size-full object-cover" />
+                  ) : (
+                    d.name.slice(0, 2).toUpperCase()
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold truncate">{d.name}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {d.movements.length} mov · {d.notes.length} notas
+                    {lastShift ? ` · ${hhmm(lastShift.started_at)}–${hhmm(lastShift.ended_at)}` : ""}
+                  </p>
+                </div>
+                {f && (
+                  <span
+                    className={`text-[10px] font-bold uppercase px-2 py-1 rounded border shrink-0 ${
+                      f.fresh && d.loc?.is_on_shift ? "text-primary border-primary/40" : "text-muted-foreground border-border"
+                    }`}
+                  >
+                    {d.loc?.is_on_shift ? f.label : "Fuera de turno"}
+                  </span>
+                )}
+              </button>
+
+              {open && (
+                <div className="border-t border-border p-3 space-y-4">
+                  {/* Turnos */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Turnos</p>
+                    {d.shifts.length === 0 && <p className="text-xs text-muted-foreground">Sin turnos registrados.</p>}
+                    {d.shifts.slice(0, 5).map((s) => (
+                      <p key={s.id} className="text-[11px] font-mono">
+                        {new Date(s.started_at).toLocaleDateString("es-US")} · entrada {hhmm(s.started_at)} · salida{" "}
+                        {hhmm(s.ended_at)}
+                      </p>
+                    ))}
+                  </div>
+
+                  {/* GPS */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Ubicación GPS</p>
+                    {!d.loc && <p className="text-xs text-muted-foreground">Sin ubicación registrada.</p>}
+                    {d.loc && (
+                      <>
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          {d.loc.latitude.toFixed(5)}, {d.loc.longitude.toFixed(5)}
+                          {d.loc.accuracy ? ` · ±${Math.round(d.loc.accuracy)} m` : ""}
+                        </p>
+                        <div className="rounded-lg overflow-hidden border border-border">
+                          <iframe
+                            title={`Mapa de ${d.name}`}
+                            className="w-full h-48"
+                            loading="lazy"
+                            src={`https://www.openstreetmap.org/export/embed.html?bbox=${d.loc.longitude - 0.005}%2C${d.loc.latitude - 0.004}%2C${d.loc.longitude + 0.005}%2C${d.loc.latitude + 0.004}&layer=mapnik&marker=${d.loc.latitude}%2C${d.loc.longitude}`}
+                          />
+                          <a
+                            href={`https://www.google.com/maps?q=${d.loc.latitude},${d.loc.longitude}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block bg-secondary p-2 text-center text-[10px] font-bold uppercase tracking-widest text-primary"
+                          >
+                            Abrir en Google Maps
+                          </a>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Notas privadas */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Notas privadas</p>
+                    {d.notes.length === 0 && <p className="text-xs text-muted-foreground">Sin notas.</p>}
+                    {d.notes.map((n) => (
+                      <div key={n.id} className="bg-secondary p-2 rounded-lg border border-accent/50">
+                        <p className="text-[10px] font-bold uppercase text-muted-foreground">
+                          {new Date(n.created_at).toLocaleString("es-US")}
+                        </p>
+                        <p className="text-xs whitespace-pre-wrap">{n.body}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Movimientos del conductor */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Movimientos ({d.movements.length})
+                    </p>
+                    {d.movements.slice(0, 30).map((m) => (
+                      <div key={m.id} className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-mono truncate">
+                          #{String(m.movement_number).padStart(3, "0")} {m.plate_state}-{m.plate} ·{" "}
+                          {new Date(m.occurred_at).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" })}
+                          {m.dropoff_location ? ` · ${m.dropoff_location}` : ""}
+                        </p>
+                        <span className="text-[10px] font-bold shrink-0">
+                          {SITE_LABEL[m.origin]} → <span className="text-primary">{SITE_LABEL[m.destination]}</span>
+                        </span>
+                      </div>
+                    ))}
+                    {d.movements.length === 0 && <p className="text-xs text-muted-foreground">Sin movimientos.</p>}
+                  </div>
+
+                  {/* Cuenta (solo administradores) */}
+                  {isAdmin && d.account && (
+                    <div className="border-t border-border pt-3 flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] text-muted-foreground truncate">{d.account.email}</p>
+                      </div>
+                      <select
+                        value={d.account.role}
+                        aria-label={`Rol de ${d.name}`}
+                        onChange={async (e) => {
+                          const role = e.target.value as "conductor" | "supervisor" | "administrador";
+                          try {
+                            await changeRole({ data: { userId: d.id, role } });
+                            setUserMsg("Rol actualizado");
+                            void loadUsers();
+                          } catch {
+                            setUserMsg("No se pudo cambiar el rol");
+                          }
+                        }}
+                        className="bg-secondary border border-border rounded px-2 py-1 text-[10px] font-bold uppercase"
+                      >
+                        <option value="conductor">Driver</option>
+                        <option value="supervisor">Supervisor</option>
+                        <option value="administrador">Admin</option>
+                      </select>
+                      <button
+                        disabled={d.id === user?.id}
+                        onClick={async () => {
+                          if (!window.confirm(`¿Eliminar definitivamente la cuenta de ${d.name}?`)) return;
+                          try {
+                            await removeUser({ data: { userId: d.id } });
+                            setUserMsg("Cuenta eliminada");
+                            void loadUsers();
+                          } catch {
+                            setUserMsg("No se pudo eliminar la cuenta");
+                          }
+                        }}
+                        className="text-[10px] font-bold uppercase text-destructive disabled:opacity-30"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           );
         })}
-        {focus && (
-          <div className="rounded-xl overflow-hidden border border-border">
-            <iframe
-              title={`Mapa de ${names[focus.user_id] ?? "conductor"}`}
-              className="w-full h-64"
-              loading="lazy"
-              src={`https://www.openstreetmap.org/export/embed.html?bbox=${focus.longitude - 0.005}%2C${focus.latitude - 0.004}%2C${focus.longitude + 0.005}%2C${focus.latitude + 0.004}&layer=mapnik&marker=${focus.latitude}%2C${focus.longitude}`}
-            />
-            <a
-              href={`https://www.google.com/maps?q=${focus.latitude},${focus.longitude}`}
-              target="_blank"
-              rel="noreferrer"
-              className="block bg-card p-2 text-center text-[10px] font-bold uppercase tracking-widest text-primary"
-            >
-              Abrir en Google Maps
-            </a>
-          </div>
-        )}
+        {userMsg && <p className="text-[10px] text-muted-foreground">{userMsg}</p>}
       </section>
-
-      <div className="bg-panel text-panel-foreground rounded-xl p-4 grid grid-cols-4 gap-3">
-        {(Object.keys(SITE_LABEL) as SiteCode[]).map((s) => (
-          <div key={s}>
-            <p className="text-[10px] uppercase text-panel-foreground/50">{SITE_LABEL[s]}</p>
-            <p className="font-mono text-sm font-bold">↓{stats.bySite[s].in} ↑{stats.bySite[s].out}</p>
-          </div>
-        ))}
-      </div>
-
-      <section className="space-y-2">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Por conductor</h2>
-        {stats.byDriver.map(([id, count]) => (
-          <div key={id} className="bg-card border border-border rounded-lg p-3 flex justify-between items-center">
-            <span className="text-xs font-semibold">{names[id] ?? "Conductor"}</span>
-            <span className="font-mono font-bold text-sm">{String(count).padStart(2, "0")}</span>
-          </div>
-        ))}
-        {stats.byDriver.length === 0 && !busy && (
-          <p className="text-xs text-muted-foreground">Sin movimientos en el rango seleccionado.</p>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Movimientos</h2>
-        {rows.slice(0, 50).map((m) => (
-          <div key={m.id} className="bg-card p-3 rounded-lg border border-border flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold font-mono">
-                #{String(m.movement_number).padStart(3, "0")} · {m.plate_state}-{m.plate}
-              </p>
-              <p className="text-[10px] text-muted-foreground">
-                {names[m.driver_id] ?? "Conductor"} • {new Date(m.occurred_at).toLocaleString("es-US")}
-                {m.dropoff_location ? ` • ${m.dropoff_location}` : ""}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-muted-foreground">{SITE_LABEL[m.origin]}</span>
-              <span className="text-border">→</span>
-              <span className="text-[10px] font-bold text-primary">{SITE_LABEL[m.destination]}</span>
-            </div>
-          </div>
-        ))}
-      </section>
-
-
-
-
     </>
   );
 }
