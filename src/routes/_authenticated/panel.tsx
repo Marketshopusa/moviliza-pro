@@ -39,6 +39,15 @@ function todayISO() {
 
 type NoteRow = { id: string; driver_id: string; body: string; created_at: string };
 
+type LocRow = {
+  user_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  is_on_shift: boolean;
+  recorded_at: string;
+};
+
 function PanelPage() {
   const { isSupervisor, loading } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
