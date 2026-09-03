@@ -41,13 +41,20 @@ export function AppShell({ children }: { children?: ReactNode }) {
     <div className={cn("min-h-screen font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
       <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border">
         <div className="mx-auto max-w-5xl px-4 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center">
+          <Link to="/" className="flex items-center gap-2">
             <img
               src="/logo-moviliza-pro-icon.png"
               alt="MOVILIZA-PRO"
               className="h-[72px] w-auto object-contain -my-2 relative z-10"
               width={1024}
               height={1024}
+            />
+            <img
+              src="/moviliza-pro-wordmark.png"
+              alt="MOVILIZA-PRO"
+              className="h-5 w-auto object-contain"
+              width={304}
+              height={26}
             />
           </Link>
           <div className="flex items-center gap-3">
