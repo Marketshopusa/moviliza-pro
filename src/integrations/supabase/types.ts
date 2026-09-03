@@ -268,11 +268,109 @@ export type Database = {
         }
         Relationships: []
       }
+      voice_channel_members: {
+        Row: {
+          channel_id: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          channel_id: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          channel_id?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_channel_members_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "voice_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      voice_channels: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_admin_only: boolean
+          name: string
+          passcode_hash: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_admin_only?: boolean
+          name: string
+          passcode_hash: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_admin_only?: boolean
+          name?: string
+          passcode_hash?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      voice_messages: {
+        Row: {
+          audio_path: string
+          channel_id: string
+          created_at: string
+          duration_ms: number | null
+          id: string
+          sender_id: string
+        }
+        Insert: {
+          audio_path: string
+          channel_id: string
+          created_at?: string
+          duration_ms?: number | null
+          id?: string
+          sender_id: string
+        }
+        Update: {
+          audio_path?: string
+          channel_id?: string
+          created_at?: string
+          duration_ms?: number | null
+          id?: string
+          sender_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_messages_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "voice_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      create_voice_channel: {
+        Args: { _is_admin_only?: boolean; _name: string; _passcode: string }
+        Returns: string
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -280,7 +378,15 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_channel_member: {
+        Args: { _channel_id: string; _user_id: string }
+        Returns: boolean
+      }
       is_supervisor: { Args: { _user_id: string }; Returns: boolean }
+      join_voice_channel: {
+        Args: { _channel_id: string; _passcode: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "conductor" | "supervisor" | "administrador"
