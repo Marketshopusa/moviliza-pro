@@ -190,7 +190,10 @@ function PanelPage() {
 
   return (
     <>
-      <h1 className="text-lg font-bold uppercase tracking-widest">Panel de supervisión</h1>
+      <div className="text-center space-y-0.5">
+        <h1 className="text-2xl font-black uppercase tracking-tight text-foreground">MOVILIZA-PRO</h1>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Panel de supervisión</p>
+      </div>
 
       <div className="bg-card border border-border rounded-xl p-4 grid grid-cols-2 gap-3">
         <label className="space-y-1">
