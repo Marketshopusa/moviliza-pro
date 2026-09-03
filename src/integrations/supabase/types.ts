@@ -14,11 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      driver_notes: {
+        Row: {
+          body: string
+          created_at: string
+          driver_id: string
+          id: string
+          movement_id: string | null
+          shift_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          driver_id: string
+          id?: string
+          movement_id?: string | null
+          shift_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          driver_id?: string
+          id?: string
+          movement_id?: string | null
+          shift_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_notes_movement_id_fkey"
+            columns: ["movement_id"]
+            isOneToOne: false
+            referencedRelation: "movements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "driver_notes_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       movements: {
         Row: {
           created_at: string
           destination: Database["public"]["Enums"]["site_code"]
           driver_id: string
+          dropoff_location: string | null
           id: string
           latitude: number | null
           longitude: number | null
@@ -27,6 +73,7 @@ export type Database = {
           occurred_at: string
           origin: Database["public"]["Enums"]["site_code"]
           photo_path: string | null
+          photos: Json
           plate: string
           plate_state: string
           shift_id: string | null
@@ -37,6 +84,7 @@ export type Database = {
           created_at?: string
           destination: Database["public"]["Enums"]["site_code"]
           driver_id: string
+          dropoff_location?: string | null
           id?: string
           latitude?: number | null
           longitude?: number | null
@@ -45,6 +93,7 @@ export type Database = {
           occurred_at?: string
           origin: Database["public"]["Enums"]["site_code"]
           photo_path?: string | null
+          photos?: Json
           plate: string
           plate_state?: string
           shift_id?: string | null
@@ -55,6 +104,7 @@ export type Database = {
           created_at?: string
           destination?: Database["public"]["Enums"]["site_code"]
           driver_id?: string
+          dropoff_location?: string | null
           id?: string
           latitude?: number | null
           longitude?: number | null
@@ -63,6 +113,7 @@ export type Database = {
           occurred_at?: string
           origin?: Database["public"]["Enums"]["site_code"]
           photo_path?: string | null
+          photos?: Json
           plate?: string
           plate_state?: string
           shift_id?: string | null
