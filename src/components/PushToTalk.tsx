@@ -159,6 +159,38 @@ export function PushToTalk() {
     void load();
   }
 
+  async function changePasscode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!manageId) return;
+    setStatus(null);
+    const { error } = await supabase.rpc("update_voice_channel_passcode", {
+      _channel_id: manageId,
+      _passcode: managePass.trim(),
+    });
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+    setManagePass("");
+    setManageId(null);
+    setStatus("Clave actualizada. Los demás deberán ingresarla de nuevo.");
+    void load();
+  }
+
+  async function removeChannel(id: string, name: string) {
+    if (!window.confirm(`¿Eliminar el canal "${name}"? Se borrarán sus audios.`)) return;
+    const { error } = await supabase.rpc("delete_voice_channel", { _channel_id: id });
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+    if (channelId === id) setChannelId(null);
+    setStatus("Canal eliminado");
+    void load();
+  }
+
+
+
   async function startTalk() {
     if (!user || !channelId || !isMember || recording) return;
     try {
