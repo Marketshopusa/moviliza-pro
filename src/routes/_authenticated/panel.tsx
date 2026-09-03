@@ -191,7 +191,9 @@ function PanelPage() {
   return (
     <>
       <div className="text-center space-y-0.5">
-        <h1 className="text-2xl font-black uppercase tracking-tight text-foreground">MOVILIZA-PRO</h1>
+        <h1>
+          <img src="/moviliza-pro-wordmark.png" alt="MOVILIZA-PRO" className="h-8 w-auto object-contain" width={304} height={26} />
+        </h1>
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Panel de supervisión</p>
       </div>
 
