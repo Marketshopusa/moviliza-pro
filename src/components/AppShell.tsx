@@ -40,7 +40,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   return (
     <div className={cn("min-h-screen font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
       <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border">
-        <div className="mx-auto max-w-5xl px-4 h-16 flex items-center justify-between">
+        <div className="mx-auto max-w-5xl px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 sm:py-0 sm:h-16">
           <Link to="/" className="flex items-center gap-2">
             <img
               src="/logo-moviliza-pro-icon.png"
@@ -57,33 +57,47 @@ export function AppShell({ children }: { children?: ReactNode }) {
               height={26}
             />
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-3">
+              {isSupervisor ? (
+                <Link
+                  to="/panel"
+                  className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-primary border border-primary/40 rounded px-2 py-1"
+                >
+                  {role}
+                </Link>
+              ) : (
+                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
+                  {role}
+                </span>
+              )}
+
+              <Link to="/perfil" className="size-8 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-xs font-mono font-bold">
+                {avatar ? (
+                  <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
+                ) : (
+                  (profile?.initials ?? "?")
+                )}
+              </Link>
+              <button
+                onClick={() => void salir()}
+                className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground"
+              >
+                Salir
+              </button>
+            </div>
             {isSupervisor ? (
               <Link
                 to="/panel"
-                className="text-[10px] font-bold uppercase tracking-widest text-primary border border-primary/40 rounded px-2 py-1"
+                className="sm:hidden text-[10px] font-bold uppercase tracking-widest text-primary border border-primary/40 rounded px-2 py-1"
               >
                 {role}
               </Link>
             ) : (
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
+              <span className="sm:hidden text-[10px] font-bold uppercase tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
                 {role}
               </span>
             )}
-
-            <Link to="/perfil" className="size-8 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-xs font-mono font-bold">
-              {avatar ? (
-                <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
-              ) : (
-                (profile?.initials ?? "?")
-              )}
-            </Link>
-            <button
-              onClick={() => void salir()}
-              className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground"
-            >
-              Salir
-            </button>
           </div>
         </div>
       </header>
