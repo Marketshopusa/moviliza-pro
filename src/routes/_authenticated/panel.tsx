@@ -92,6 +92,25 @@ function PanelPage() {
   const [avatars, setAvatars] = useState<Record<string, string>>({});
   const [openDriver, setOpenDriver] = useState<string | null>(null);
   const [tab, setTab] = useState<string>(SHIFT_BLOCKS[0].id);
+  const [workShifts, setWorkShifts] = useState<WorkShift[]>([]);
+  const [assigns, setAssigns] = useState<Assignment[]>([]);
+  const [shiftMsg, setShiftMsg] = useState<string | null>(null);
+  const [newShift, setNewShift] = useState({ name: "", start: "18:00", end: "02:30" });
+  const [newEmail, setNewEmail] = useState<Record<string, string>>({});
+
+  const loadShifts = useCallback(async () => {
+    const [{ data: ws }, { data: sa }] = await Promise.all([
+      supabase.from("work_shifts").select("id, name, start_time, end_time").order("start_time"),
+      supabase.from("shift_assignments").select("id, shift_id, email, user_id"),
+    ]);
+    setWorkShifts((ws as WorkShift[]) ?? []);
+    setAssigns((sa as Assignment[]) ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (isSupervisor) void loadShifts();
+  }, [isSupervisor, loadShifts]);
+
 
   useEffect(() => {
     if (!isSupervisor) return;
