@@ -45,7 +45,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             <img
               src="/logo-moviliza-pro-icon.png"
               alt="MOVILIZA-PRO"
-              className="h-11 w-auto object-contain"
+              className="h-[72px] w-auto object-contain -my-2 relative z-10"
               width={1024}
               height={1024}
             />
