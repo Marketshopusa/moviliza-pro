@@ -143,6 +143,19 @@ function PanelPage() {
   }, [isSupervisor, from, to]);
 
 
+  const loadUsers = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      setUsers(await fetchUsers({ data: undefined as never }));
+    } catch {
+      setUserMsg("No se pudo cargar la lista de usuarios.");
+    }
+  }, [isAdmin, fetchUsers]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
+
   const stats = useMemo(() => {
     const byDriver = new Map<string, number>();
     const bySite: Record<SiteCode, { in: number; out: number }> = {
