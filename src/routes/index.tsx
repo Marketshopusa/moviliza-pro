@@ -28,7 +28,7 @@ function Index() {
   const navigate = useNavigate();
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/app" });
+      if (data.user) navigate({ to: "/drivers" });
       else navigate({ to: "/auth" });
     });
   }, [navigate]);

@@ -60,19 +60,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
           <div className="flex flex-col items-end gap-1.5">
             <div className="flex items-center gap-3">
               <RoleBadge className="hidden sm:inline-block" />
-              <Link to="/perfil" className="size-8 rounded overflow-hidden bg-panel text-panel-foreground grid place-items-center text-xs font-mono font-bold">
+              <Link to="/perfil" className="size-12 rounded-lg overflow-hidden bg-panel text-panel-foreground grid place-items-center text-sm font-mono font-bold">
                 {avatar ? (
                   <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
                 ) : (
                   (profile?.initials ?? "?")
                 )}
               </Link>
-              <button
-                onClick={() => void salir()}
-                className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground"
-              >
-                Salir
-              </button>
             </div>
             <RoleBadge className="sm:hidden" />
           </div>

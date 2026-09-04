@@ -357,43 +357,6 @@ function DriverHome() {
 
   return (
     <>
-      <div className="bg-panel rounded-xl p-5 text-panel-foreground shadow-lg">
-        <div className="flex justify-between items-start mb-4 gap-3">
-          <PushToTalk />
-
-          <div className="flex flex-col items-end gap-2">
-            <span
-              className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${online ? "bg-success/20 text-success border-success/30" : "bg-accent/20 text-accent border-accent/30"}`}
-            >
-              {online ? "En línea" : `Offline · ${pendingCount}`}
-            </span>
-            <span className="text-[10px] uppercase tracking-wider text-panel-foreground/50">
-              {shift ? `Turno desde ${hhmm(shift.started_at)}` : "Sin turno"}
-            </span>
-            <button
-              onClick={toggleShift}
-              className="text-[10px] font-bold uppercase tracking-widest bg-panel-foreground text-panel px-3 py-1.5 rounded"
-            >
-              {shift ? "Cerrar turno" : "Iniciar turno"}
-            </button>
-
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-4 border-t border-panel-foreground/10 pt-4">
-          <div>
-            <p className="text-panel-foreground/50 text-[10px] uppercase mb-1">Movimientos</p>
-            <p className="text-lg font-mono font-bold">{String(totals.total).padStart(2, "0")}</p>
-          </div>
-          <div>
-            <p className="text-panel-foreground/50 text-[10px] uppercase mb-1">Hacia Base X</p>
-            <p className="text-lg font-mono font-bold">{String(totals.toBase).padStart(2, "0")}</p>
-          </div>
-          <div>
-            <p className="text-panel-foreground/50 text-[10px] uppercase mb-1">Desde Base X</p>
-            <p className="text-lg font-mono font-bold">{String(totals.fromBase).padStart(2, "0")}</p>
-          </div>
-        </div>
-      </div>
 
       <section className="space-y-3">
         <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">Nuevo registro</h2>

@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard } from "@/lib/vehicle-card.functions";
 import { cn } from "@/lib/utils";
+import { ShiftPanel } from "@/components/ShiftPanel";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -110,24 +111,16 @@ function DriversPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-bold uppercase tracking-widest">Drivers</h1>
+      <ShiftPanel />
 
-      <div className="rounded-xl overflow-hidden border border-border bg-card aspect-video">
-        <iframe
-          title="Mapa de ruta"
-          src={mapSrc}
-          className="w-full h-full"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      </div>
+      <h1 className="text-lg font-bold uppercase tracking-widest">Drivers</h1>
 
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => setTab("salida")}
           className={cn(
-            "py-2 rounded-lg text-xs font-bold uppercase tracking-widest border",
+            "py-3 rounded-lg text-sm font-bold uppercase tracking-widest border",
             tab === "salida" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground",
           )}
         >
@@ -137,7 +130,7 @@ function DriversPage() {
           type="button"
           onClick={() => setTab("retorno")}
           className={cn(
-            "py-2 rounded-lg text-xs font-bold uppercase tracking-widest border",
+            "py-3 rounded-lg text-sm font-bold uppercase tracking-widest border",
             tab === "retorno" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground",
           )}
         >
@@ -145,9 +138,20 @@ function DriversPage() {
         </button>
       </div>
 
+      <div className="rounded-xl overflow-hidden border border-border bg-card h-[380px]">
+        <iframe
+          title="Mapa de ruta"
+          src={mapSrc}
+          className="w-full h-full"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      </div>
+
       {tab === "salida" ? (
         <section className="bg-card border border-border rounded-xl p-4 space-y-4">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Tarjeta de salida</h2>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Ruta de driver</h2>
+
 
           <div className="space-y-3">
             <input
