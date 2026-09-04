@@ -230,13 +230,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setError("Confirma con OK que el vehículo está en condiciones para salir.");
       return;
     }
-    if (mode === "retorno" && (!servicio || !fotoUbicacion || !fotoLlave)) {
-      setError("Elige el servicio y toma las dos fotos (ubicación del carro y llave).");
-      return;
-    }
     setBusy(true);
     setError(null);
-    const fotos = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
+    const fotos: string[] = [];
+
     const { data, error: err } = await supabase
       .from("movements")
       .insert({
@@ -254,7 +251,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
         notes:
           mode === "salida"
             ? "Vehículo revisado OK antes de iniciar ruta"
-            : `Retorno · servicio: ${servicio}`,
+            : "Retorno hacia Base X",
+
         photos: fotos,
         photo_path: fotos[0] ?? null,
       })
@@ -279,26 +277,38 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setError(`No estás en la ubicación correcta (${Math.round(distancia ?? 0)} m de ${meta.label}).`);
       return;
     }
-    if (!spot || !verifSpot) {
-      setError("Toma las dos fotos: número de parqueo y verificación.");
-      return;
-    }
-    if (spot !== verifSpot) {
-      setError(`Error: el parqueo de la foto (${spot}) no coincide con el registrado en el teléfono (${verifSpot}). Corrige el registro.`);
-      return;
-    }
-    if (verifTerminal && verifTerminal !== terminalEsperado) {
-      setError(
-        `Error de terminal: el teléfono registra Terminal ${verifTerminal} y este movimiento va al Terminal ${terminalEsperado}. Corrige el registro.`,
-      );
-      return;
+    if (mode === "retorno") {
+      if (!servicio || !fotoUbicacion || !fotoLlave) {
+        setError("Elige el área en la base y toma las dos fotos (parqueo y llave).");
+        return;
+      }
+    } else {
+      if (!spot || !verifSpot) {
+        setError("Toma las dos fotos: número de parqueo y verificación.");
+        return;
+      }
+      if (spot !== verifSpot) {
+        setError(`Error: el parqueo de la foto (${spot}) no coincide con el registrado en el teléfono (${verifSpot}). Corrige el registro.`);
+        return;
+      }
+      if (verifTerminal && verifTerminal !== terminalEsperado) {
+        setError(
+          `Error de terminal: el teléfono registra Terminal ${verifTerminal} y este movimiento va al Terminal ${terminalEsperado}. Corrige el registro.`,
+        );
+        return;
+      }
     }
     setBusy(true);
+    const fotosLlegada = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
     const { error: err } = await supabase
       .from("movements")
       .update({
-        dropoff_location: spot,
-        notes: `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
+        dropoff_location: mode === "retorno" ? servicio : spot,
+        notes:
+          mode === "retorno"
+            ? `Llegada a Base X · área: ${servicio} (fotos parqueo y llave)`
+            : `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
+        ...(mode === "retorno" ? { photos: fotosLlegada, photo_path: fotosLlegada[0] } : {}),
         latitude: position.lat,
         longitude: position.lng,
       })
@@ -307,7 +317,12 @@ function RutaFlow({ mode }: { mode: Mode }) {
     if (err) setError(err.message);
     else {
       setError(null);
-      setMessage(`Llegada confirmada en ${meta.label}, parqueo ${spot}.`);
+      setMessage(
+        mode === "retorno"
+          ? `Llegada confirmada en Base X · ${servicio}.`
+          : `Llegada confirmada en ${meta.label}, parqueo ${spot}.`,
+      );
+
       setPlate("");
       setModel("");
       setTerminal(null);
@@ -415,82 +430,16 @@ function RutaFlow({ mode }: { mode: Mode }) {
           )}
 
           {mode === "retorno" && (
-            <div className="space-y-2">
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                ref={ubicacionRef}
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void subirFotoServicio(f, "ubicacion");
-                  e.currentTarget.value = "";
-                }}
-              />
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                ref={llaveRef}
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void subirFotoServicio(f, "llave");
-                  e.currentTarget.value = "";
-                }}
-              />
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                Servicio en la base · al elegir se abre la cámara (foto del carro y de la llave)
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {SERVICIOS.map((s) => {
-                  const activo = servicio === s;
-                  const enProceso = pendiente === s;
-                  const principal = s === "Limpieza general";
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => elegirServicio(s)}
-                      disabled={subiendo !== null}
-                      className={cn(
-                        "py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest border disabled:opacity-60",
-                        principal && "col-span-2",
-                        activo
-                          ? "bg-green-600 text-white border-green-600"
-                          : enProceso
-                            ? "bg-accent text-accent-foreground border-accent"
-                            : "bg-background text-muted-foreground border-border",
-                      )}
-                    >
-                      {enProceso
-                        ? subiendo === "llave"
-                          ? "Foto de la llave…"
-                          : "Foto del carro…"
-                        : activo
-                          ? `${s} ✓`
-                          : s}
-                    </button>
-                  );
-                })}
-              </div>
-              {servicio && (
-                <p className="text-center text-[11px] font-bold uppercase tracking-widest text-green-700 bg-green-600/10 rounded-lg p-2">
-                  {servicio} · fotos listas (carro + llave)
-                </p>
-              )}
-            </div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-center text-muted-foreground">
+              El área de la base se elige al llegar
+            </p>
           )}
 
           <button
             type="button"
             onClick={() => void iniciarRuta()}
-            disabled={
-              busy ||
-              !plate ||
-              (mode === "salida" ? !terminal || !revisado : !servicio)
-            }
+            disabled={busy || !plate || (mode === "salida" ? !terminal || !revisado : false)}
+
             className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60"
           >
             {busy ? "Guardando…" : "Iniciar ruta"}
@@ -537,50 +486,126 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 e.currentTarget.value = "";
               }}
             />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              ref={ubicacionRef}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void subirFotoServicio(f, "ubicacion");
+                e.currentTarget.value = "";
+              }}
+            />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              ref={llaveRef}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void subirFotoServicio(f, "llave");
+                e.currentTarget.value = "";
+              }}
+            />
 
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => spotRef.current?.click()}
-                disabled={leyendo !== null}
-                className="py-3 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-[11px] tracking-widest disabled:opacity-60"
-              >
-                {leyendo === "spot" ? "Leyendo…" : spot ? `Parqueo ${spot}` : "Foto del parqueo"}
-              </button>
-              <button
-                type="button"
-                onClick={() => verifRef.current?.click()}
-                disabled={leyendo !== null}
-                className="py-3 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-[11px] tracking-widest disabled:opacity-60"
-              >
-                {leyendo === "verif" ? "Leyendo…" : verifSpot || verifTerminal ? `Verif. ${verifSpot}${verifTerminal ? ` · ${verifTerminal}` : ""}` : "Foto verificación"}
-              </button>
-            </div>
-
-            {spot && verifSpot && (
-              <p
-                className={cn(
-                  "text-center text-[11px] font-bold uppercase tracking-widest rounded-lg p-2",
-                  coincide ? "text-green-700 bg-green-600/10" : "text-white bg-red-600",
+            {mode === "retorno" ? (
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  {enSitio
+                    ? "Elige el área donde dejas el carro · se abre la cámara (parqueo y llave)"
+                    : "Al llegar a la Base X podrás elegir el área"}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {SERVICIOS.map((s) => {
+                    const activo = servicio === s;
+                    const enProceso = pendiente === s;
+                    const principal = s === "Limpieza general";
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => elegirServicio(s)}
+                        disabled={!enSitio || subiendo !== null}
+                        className={cn(
+                          "py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest border disabled:opacity-50",
+                          principal && "col-span-2",
+                          activo
+                            ? "bg-green-600 text-white border-green-600"
+                            : enProceso
+                              ? "bg-accent text-accent-foreground border-accent"
+                              : "bg-background text-muted-foreground border-border",
+                        )}
+                      >
+                        {enProceso
+                          ? subiendo === "llave"
+                            ? "Foto de la llave…"
+                            : "Foto del parqueo…"
+                          : activo
+                            ? `${s} ✓`
+                            : s}
+                      </button>
+                    );
+                  })}
+                </div>
+                {servicio && fotoUbicacion && fotoLlave && (
+                  <p className="text-center text-[11px] font-bold uppercase tracking-widest text-green-700 bg-green-600/10 rounded-lg p-2">
+                    {servicio} · fotos listas (parqueo + llave)
+                  </p>
                 )}
-              >
-                {coincide
-                  ? `Verificado: ${spot} en Terminal ${terminalEsperado}`
-                  : `No coincide: parqueo ${spot} vs ${verifSpot}${verifTerminal ? ` · Terminal ${verifTerminal}` : ""}. Corrige el registro.`}
-              </p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => spotRef.current?.click()}
+                    disabled={leyendo !== null}
+                    className="py-3 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-[11px] tracking-widest disabled:opacity-60"
+                  >
+                    {leyendo === "spot" ? "Leyendo…" : spot ? `Parqueo ${spot}` : "Foto del parqueo"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => verifRef.current?.click()}
+                    disabled={leyendo !== null}
+                    className="py-3 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-[11px] tracking-widest disabled:opacity-60"
+                  >
+                    {leyendo === "verif" ? "Leyendo…" : verifSpot || verifTerminal ? `Verif. ${verifSpot}${verifTerminal ? ` · ${verifTerminal}` : ""}` : "Foto verificación"}
+                  </button>
+                </div>
+
+                {spot && verifSpot && (
+                  <p
+                    className={cn(
+                      "text-center text-[11px] font-bold uppercase tracking-widest rounded-lg p-2",
+                      coincide ? "text-green-700 bg-green-600/10" : "text-white bg-red-600",
+                    )}
+                  >
+                    {coincide
+                      ? `Verificado: ${spot} en Terminal ${terminalEsperado}`
+                      : `No coincide: parqueo ${spot} vs ${verifSpot}${verifTerminal ? ` · Terminal ${verifTerminal}` : ""}. Corrige el registro.`}
+                  </p>
+                )}
+              </>
             )}
 
             <button
               type="button"
               onClick={() => void confirmarLlegada()}
-              disabled={busy || !enSitio || !coincide}
+              disabled={busy || !enSitio || (mode === "retorno" ? !servicio || !fotoUbicacion || !fotoLlave : !coincide)}
               className={cn(
                 "w-full py-4 rounded-xl font-bold uppercase text-xs tracking-widest",
-                enSitio && coincide ? "bg-green-600 text-white" : "bg-muted text-muted-foreground",
+                enSitio && (mode === "retorno" ? !!servicio && !!fotoUbicacion && !!fotoLlave : coincide)
+                  ? "bg-green-600 text-white"
+                  : "bg-muted text-muted-foreground",
               )}
             >
               Llegada
             </button>
+
 
             {meta && distancia !== null && (
               <p className={cn("text-center text-[11px] font-bold uppercase tracking-widest", enSitio ? "text-green-700" : "text-muted-foreground")}>
