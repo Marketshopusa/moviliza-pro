@@ -32,7 +32,7 @@ export const readVehicleCard = createServerFn({ method: "POST" })
           {
             role: "system",
             content:
-              "Eres un lector de tarjetas de vehículos y placas de EE.UU. Devuelve SOLO un JSON con las claves plate_state (código de 2 letras del estado, ej FL), plate (solo caracteres alfanuméricos en mayúscula) y vehicle_model (marca y modelo, ej 'FREIGHTLINER CASCADIA' o 'TOYOTA COROLLA'). Usa null si el dato no aparece.",
+              "Eres un lector de tarjetas de vehículos y placas de EE.UU. Devuelve SOLO un JSON con las claves plate_state (código de 2 letras del estado, ej FL), plate (solo caracteres alfanuméricos en mayúscula), vehicle_model (marca y modelo) y card_color. card_color es el color DOMINANTE del fondo o superficie sobre la que está apoyada la tarjeta/llave: usa exactamente 'amarillo', 'verde', 'azul' o 'negro'. Usa null si el dato no aparece.",
           },
           {
             role: "user",
