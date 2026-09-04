@@ -106,6 +106,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [pendiente, setPendiente] = useState<Servicio | null>(null);
   const [fotoUbicacion, setFotoUbicacion] = useState<string | null>(null);
   const [fotoLlave, setFotoLlave] = useState<string | null>(null);
+  // Todas las fotos tomadas durante la ruta (incluidas las usadas para escanear).
+  const [fotos, setFotos] = useState<string[]>([]);
   const [subiendo, setSubiendo] = useState<"ubicacion" | "llave" | null>(null);
 
   // Llegada: foto del número de parqueo y foto de verificación (pantalla del teléfono).
@@ -139,11 +141,34 @@ function RutaFlow({ mode }: { mode: Mode }) {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
+  /** Guarda en el sistema cualquier foto tomada (también las usadas para escanear). */
+  async function archivarFoto(file: File, kind: string): Promise<string | null> {
+    if (!user) return null;
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
+      if (upErr) return null;
+      setFotos((prev) => [...prev, path]);
+      if (movementId) {
+        const nuevas = [...fotos, path];
+        void supabase
+          .from("movements")
+          .update({ photos: nuevas, photo_path: nuevas[0] ?? null })
+          .eq("id", movementId);
+      }
+      return path;
+    } catch {
+      return null;
+    }
+  }
+
   async function handleCard(file: File) {
     setScanning(true);
     setScanMsg(null);
     setError(null);
     try {
+      void archivarFoto(file, "tarjeta");
       const dataUrl = await fileToDataUrl(file);
       const res = await readCard({ data: { image: dataUrl } });
       if (res.plate) setPlate(res.plate);
@@ -182,6 +207,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
     setLeyendo(kind);
     setError(null);
     try {
+      void archivarFoto(file, kind === "spot" ? "parqueo" : "verificacion");
       const dataUrl = await fileToDataUrl(file);
       const res = await readSpot({ data: { image: dataUrl } });
       if (kind === "spot") {
@@ -215,6 +241,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
       const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
       if (upErr) throw new Error(upErr.message);
+      setFotos((prev) => [...prev, path]);
       if (kind === "ubicacion") {
         setFotoUbicacion(path);
         setSubiendo(null);
@@ -247,7 +274,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
     setBusy(true);
     setError(null);
-    const fotos: string[] = [];
+    
 
     const { data, error: err } = await supabase
       .from("movements")
@@ -314,7 +341,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       }
     }
     setBusy(true);
-    const fotosLlegada = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
+    const todas = [...new Set([...fotos, ...(mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [])])];
     const { error: err } = await supabase
       .from("movements")
       .update({
@@ -323,7 +350,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
           mode === "retorno"
             ? `Llegada a Base X · área: ${servicio} (fotos parqueo y llave)`
             : `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
-        ...(mode === "retorno" ? { photos: fotosLlegada, photo_path: fotosLlegada[0] } : {}),
+        photos: todas,
+        photo_path: todas[0] ?? null,
         latitude: position.lat,
         longitude: position.lng,
       })

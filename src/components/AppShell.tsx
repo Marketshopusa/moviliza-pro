@@ -77,10 +77,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
         {children ?? <Outlet />}
       </main>
       <nav className="fixed bottom-0 inset-x-0 z-20 bg-card border-t border-border">
-        <div className="mx-auto max-w-5xl flex justify-around">
+        <div className="mx-auto max-w-5xl flex justify-between px-1">
+          <NavItem to="/drivers" label="Drivers" />
+          <NavItem to="/cleaners" label="Cleaners" />
           <NavItem to="/app" label="DAW" />
-          <NavItem to="/drivers" label="DRIVERS" />
-          <NavItem to="/cleaners" label="CLEANERS" />
           <NavItem to="/movimientos" label="Historial" />
           <NavItem to="/perfil" label="Perfil" />
           {isSupervisor && <NavItem to="/panel" label="Panel" />}
@@ -121,7 +121,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
     <Link
       to={to}
       activeOptions={{ exact: true }}
-      className="py-3 px-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground"
+      className="flex-1 text-center py-2.5 px-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-tight text-muted-foreground whitespace-nowrap"
       activeProps={{ className: "text-primary border-t-2 border-primary" }}
     >
       {label}
