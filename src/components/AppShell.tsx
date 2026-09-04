@@ -36,35 +36,32 @@ export function AppShell({ children }: { children?: ReactNode }) {
   return (
     <div className={cn("min-h-screen font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
       <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border">
-        <div className="mx-auto max-w-5xl px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 sm:py-0 sm:h-16">
-          <Link to="/" className="flex items-center gap-2">
+        <div className="mx-auto max-w-5xl px-4 flex items-center justify-between py-2">
+          <Link to="/" className="flex flex-col items-center leading-none">
             <img
               src="/logo-moviliza-pro-icon.png"
               alt="MOVILIZA-PRO"
-              className="h-[72px] w-auto object-contain -my-2 relative z-10"
+              className="h-12 w-auto object-contain"
               width={1024}
               height={1024}
             />
             <img
               src="/moviliza-pro-wordmark.png"
               alt="MOVILIZA-PRO"
-              className="h-5 w-auto object-contain"
+              className="h-4 w-auto object-contain -mt-0.5"
               width={304}
               height={26}
             />
           </Link>
-          <div className="flex flex-col items-end gap-1.5">
-            <div className="flex items-center gap-3">
-              <RoleBadge className="hidden sm:inline-block" />
-              <Link to="/perfil" className="size-12 rounded-lg overflow-hidden bg-panel text-panel-foreground grid place-items-center text-sm font-mono font-bold">
-                {avatar ? (
-                  <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
-                ) : (
-                  (profile?.initials ?? "?")
-                )}
-              </Link>
-            </div>
-            <RoleBadge className="sm:hidden" />
+          <div className="flex flex-col items-center gap-1">
+            <Link to="/perfil" className="size-14 rounded-xl overflow-hidden bg-panel text-panel-foreground grid place-items-center text-sm font-mono font-bold shadow-sm">
+              {avatar ? (
+                <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
+              ) : (
+                (profile?.initials ?? "?")
+              )}
+            </Link>
+            <RoleBadge />
           </div>
         </div>
       </header>
