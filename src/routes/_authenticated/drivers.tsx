@@ -158,6 +158,15 @@ function RutaFlow({ mode }: { mode: Mode }) {
           .maybeSingle();
         if (veh?.vehicle_model) setModel(veh.vehicle_model);
       }
+      if (res.plate) {
+        try {
+          setVehPos(await fetchVehPos({ data: { plate: res.plate } }));
+        } catch {
+          setVehPos(null);
+        }
+      } else {
+        setVehPos(null);
+      }
       const partes: string[] = [];
       if (res.plate) partes.push(`${res.plate_state ?? ""} ${res.plate}`.trim());
       if (res.terminal && res.terminal !== "X") partes.push(`color ${res.card_color} → Terminal ${res.terminal}`);
@@ -334,6 +343,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setTerminal(null);
       setRevisado(false);
       setMovementId(null);
+      setVehPos(null);
       setSpot("");
       setVerifSpot("");
       setVerifTerminal(null);
@@ -421,6 +431,26 @@ function RutaFlow({ mode }: { mode: Mode }) {
               className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
             />
           </div>
+
+          {vehPos && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                Ubicación del vehículo en Base X ·{" "}
+                {new Date(vehPos.created_at).toLocaleString("es-US", { dateStyle: "short", timeStyle: "short" })}
+              </p>
+              <VehicleSpotMap
+                lat={vehPos.latitude}
+                lng={vehPos.longitude}
+                label={`${vehPos.plate_state ?? ""} ${vehPos.plate}`.trim()}
+                yo={position}
+              />
+              {position && (
+                <p className="text-[10px] text-center font-bold uppercase tracking-widest text-muted-foreground">
+                  El vehículo está a {Math.round(distanciaM(position, { lat: vehPos.latitude, lng: vehPos.longitude }))} m de ti
+                </p>
+              )}
+            </div>
+          )}
 
           {mode === "salida" && (
             <button
