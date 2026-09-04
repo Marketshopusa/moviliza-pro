@@ -102,6 +102,7 @@ function PanelPage() {
   const [shiftMsg, setShiftMsg] = useState<string | null>(null);
   const [newShift, setNewShift] = useState({ name: "", start: "18:00", end: "02:30" });
   const [newEmail, setNewEmail] = useState<Record<string, string>>({});
+  const [openShift, setOpenShift] = useState<string | null>(null);
 
   const loadShifts = useCallback(async () => {
     const [{ data: ws }, { data: sa }] = await Promise.all([
@@ -454,72 +455,97 @@ function PanelPage() {
 
           {workShifts.map((w) => {
             const list = assigns.filter((a) => a.shift_id === w.id);
+            const expanded = openShift === w.id;
             return (
-              <div key={w.id} className="border border-border rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
+              <div key={w.id} className="border border-border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setOpenShift(expanded ? null : w.id)}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left bg-secondary/40 hover:bg-secondary/70 transition-colors"
+                >
                   <div className="min-w-0">
                     <p className="text-xs font-bold truncate">{w.name}</p>
                     <p className="text-[10px] font-mono text-muted-foreground">
-                      {w.start_time.slice(0, 5)} – {w.end_time.slice(0, 5)} · {list.length} drivers
+                      {w.start_time.slice(0, 5)} – {w.end_time.slice(0, 5)} · {list.length} driver{list.length === 1 ? "" : "s"}
                     </p>
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (!window.confirm(`¿Eliminar el turno ${w.name} y sus asignaciones?`)) return;
-                      const { error } = await supabase.from("work_shifts").delete().eq("id", w.id);
-                      setShiftMsg(error ? "No se pudo eliminar" : "Turno eliminado");
-                      void loadShifts();
-                    }}
-                    className="text-[10px] font-bold uppercase text-destructive shrink-0"
-                  >
-                    Eliminar
-                  </button>
-                </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                      {expanded ? "Ocultar" : "Ver"}
+                    </span>
+                    <svg
+                      className={`size-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </button>
 
-                {list.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] truncate">
-                      {a.email}
-                      {a.user_id ? "" : " · pendiente de registro"}
-                    </p>
+                {expanded && (
+                  <div className="px-3 pb-3 pt-2 space-y-2 border-t border-border bg-card">
+                    {list.length === 0 && <p className="text-[10px] text-muted-foreground">Sin conductores asignados.</p>}
+                    {list.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] truncate">
+                          {a.email}
+                          {a.user_id ? "" : " · pendiente de registro"}
+                        </p>
+                        <button
+                          onClick={async () => {
+                            await supabase.from("shift_assignments").delete().eq("id", a.id);
+                            void loadShifts();
+                          }}
+                          className="text-[10px] font-bold uppercase text-destructive shrink-0"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                    ))}
+
+                    <div className="flex gap-2 pt-1">
+                      <input
+                        type="email"
+                        placeholder="correo@driver.com"
+                        aria-label={`Correo para ${w.name}`}
+                        value={newEmail[w.id] ?? ""}
+                        onChange={(e) => setNewEmail({ ...newEmail, [w.id]: e.target.value })}
+                        className="flex-1 bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
+                      />
+                      <button
+                        onClick={async () => {
+                          const email = (newEmail[w.id] ?? "").trim().toLowerCase();
+                          if (!email) return;
+                          const match = users.find((u) => (u.email ?? "").toLowerCase() === email);
+                          const { error } = await supabase
+                            .from("shift_assignments")
+                            .upsert({ shift_id: w.id, email, user_id: match?.id ?? null }, { onConflict: "email" });
+                          setShiftMsg(error ? "No se pudo asignar el correo" : "Correo asignado");
+                          if (!error) setNewEmail({ ...newEmail, [w.id]: "" });
+                          void loadShifts();
+                        }}
+                        className="bg-panel text-panel-foreground font-bold px-3 rounded-lg uppercase text-[10px] tracking-widest"
+                      >
+                        Agregar
+                      </button>
+                    </div>
+
                     <button
                       onClick={async () => {
-                        await supabase.from("shift_assignments").delete().eq("id", a.id);
+                        if (!window.confirm(`¿Eliminar el turno ${w.name} y sus asignaciones?`)) return;
+                        const { error } = await supabase.from("work_shifts").delete().eq("id", w.id);
+                        setShiftMsg(error ? "No se pudo eliminar" : "Turno eliminado");
+                        if (!error) setOpenShift(null);
                         void loadShifts();
                       }}
-                      className="text-[10px] font-bold uppercase text-destructive shrink-0"
+                      className="w-full text-[10px] font-bold uppercase text-destructive py-1"
                     >
-                      Quitar
+                      Eliminar turno
                     </button>
                   </div>
-                ))}
-
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    placeholder="correo@driver.com"
-                    aria-label={`Correo para ${w.name}`}
-                    value={newEmail[w.id] ?? ""}
-                    onChange={(e) => setNewEmail({ ...newEmail, [w.id]: e.target.value })}
-                    className="flex-1 bg-secondary border border-border rounded-lg px-2 py-2 text-xs"
-                  />
-                  <button
-                    onClick={async () => {
-                      const email = (newEmail[w.id] ?? "").trim().toLowerCase();
-                      if (!email) return;
-                      const match = users.find((u) => (u.email ?? "").toLowerCase() === email);
-                      const { error } = await supabase
-                        .from("shift_assignments")
-                        .upsert({ shift_id: w.id, email, user_id: match?.id ?? null }, { onConflict: "email" });
-                      setShiftMsg(error ? "No se pudo asignar el correo" : "Correo asignado");
-                      if (!error) setNewEmail({ ...newEmail, [w.id]: "" });
-                      void loadShifts();
-                    }}
-                    className="bg-panel text-panel-foreground font-bold px-3 rounded-lg uppercase text-[10px] tracking-widest"
-                  >
-                    Agregar
-                  </button>
-                </div>
+                )}
               </div>
             );
           })}
