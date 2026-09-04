@@ -207,6 +207,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
     setLeyendo(kind);
     setError(null);
     try {
+      void archivarFoto(file, kind === "spot" ? "parqueo" : "verificacion");
       const dataUrl = await fileToDataUrl(file);
       const res = await readSpot({ data: { image: dataUrl } });
       if (kind === "spot") {
