@@ -332,7 +332,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
   }
 
   const distancia = position && meta ? distanciaM(position, meta) : null;
-  const enSitio = distancia !== null && distancia <= RADIO_M;
+  const radioPermitido = meta
+    ? RADIO_POR_PUNTO[meta.code] + Math.min(accuracy ?? 0, TOLERANCIA_MAX_M)
+    : 0;
+  const enSitio = distancia !== null && distancia <= radioPermitido;
   const coincide =
     !!spot && !!verifSpot && spot === verifSpot && (!verifTerminal || verifTerminal === terminalEsperado);
 
