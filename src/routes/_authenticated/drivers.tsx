@@ -245,7 +245,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
         plate,
         vehicle_model: model || null,
         origin: mode === "salida" ? "X" : terminal ?? "X",
-        destination: mode === "salida" ? terminal : "X",
+        destination: mode === "salida" ? terminal! : "X",
         dropoff_location: null,
         latitude: position?.lat ?? null,
         longitude: position?.lng ?? null,
