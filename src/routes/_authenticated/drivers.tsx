@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard } from "@/lib/vehicle-card.functions";
 import { cn } from "@/lib/utils";
+import { ShiftPanel } from "@/components/ShiftPanel";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
