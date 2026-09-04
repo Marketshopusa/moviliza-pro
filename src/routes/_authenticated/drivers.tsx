@@ -281,6 +281,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setError("Escanea la tarjeta: falta el terminal.");
       return;
     }
+    if (mode === "retorno" && !terminal) {
+      setError("Elige el terminal desde donde regresa el vehículo (A, B o C).");
+      return;
+    }
     if (mode === "salida" && !revisado) {
       setError("Confirma con OK que el vehículo está en condiciones para salir.");
       return;
