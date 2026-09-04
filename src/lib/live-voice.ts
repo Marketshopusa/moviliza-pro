@@ -1,37 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-/**
- * Voz en vivo tipo Zello: malla WebRTC entre los miembros del canal.
- * La señalización viaja por Supabase Realtime (broadcast + presence).
- * El micrófono se mantiene abierto pero silenciado; al presionar PTT se
- * habilita la pista y todos los conectados escuchan en tiempo real.
- *
- * La malla se auto-repara: un ciclo de reconciliación revisa cada pocos
- * segundos la presencia y el estado de cada conexión, reintenta ICE y
- * recrea los peers caídos (por ejemplo tras bloquear la pantalla).
- */
-
 const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ["stun:stun.l.google.com:19302", "stun:global.stun.twilio.com:3478"] },
+  {
+    urls: [
+      "stun:stun.l.google.com:19302",
+      "stun:stun1.l.google.com:19302",
+      "stun:global.stun.twilio.com:3478",
+    ],
+  },
 ];
 
-const RECONCILE_MS = 3000;
+const RECONCILE_MS = 2500;
+const RESTART_AFTER_MS = 6000;
 
 type SignalPayload = {
   from: string;
   to: string;
+  callId: string;
   kind: "offer" | "answer" | "ice";
-  data: unknown;
+  data: RTCSessionDescriptionInit | RTCIceCandidateInit;
 };
 
 type Peer = {
   pc: RTCPeerConnection;
   audio: HTMLAudioElement;
-  polite: boolean;
-  makingOffer: boolean;
-  sender: RTCRtpSender | null;
-  restartedAt: number;
+  sender: RTCRtpSender;
+  callId: string;
+  initiator: boolean;
+  pendingIce: RTCIceCandidateInit[];
+  disconnectedAt: number | null;
 };
 
 export type LiveVoiceState = {
@@ -49,7 +47,6 @@ export function useLiveVoice(options: {
   displayName: string;
 }) {
   const { channelId, enabled, userId, displayName } = options;
-
   const [state, setState] = useState<LiveVoiceState>({
     connected: false,
     peerCount: 0,
@@ -63,130 +60,55 @@ export function useLiveVoice(options: {
   const rtRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const talkingRef = useRef(false);
   const nameRef = useRef(displayName);
-  nameRef.current = displayName;
   const uidRef = useRef<string | null>(userId);
+  nameRef.current = displayName;
   uidRef.current = userId;
 
-  const setPeerCount = useCallback(() => {
-    setState((s) => ({ ...s, peerCount: peersRef.current.size }));
+  const updateConnectedPeers = useCallback(() => {
+    let connectedPeers = 0;
+    for (const peer of peersRef.current.values()) {
+      if (peer.pc.connectionState === "connected") connectedPeers += 1;
+    }
+    setState((current) => ({ ...current, peerCount: connectedPeers }));
   }, []);
 
   useEffect(() => {
     if (!enabled || !channelId || !userId) return;
 
     let disposed = false;
-    const peers = peersRef.current;
+    let subscribed = false;
     let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+    const peers = peersRef.current;
 
     const send = (payload: SignalPayload) => {
+      if (!subscribed || disposed) return;
       void rtRef.current?.send({ type: "broadcast", event: "signal", payload });
     };
 
+    const attachCurrentMic = (peer: Peer) => {
+      const track = streamRef.current?.getAudioTracks().find((item) => item.readyState === "live");
+      if (track && peer.sender.track !== track) void peer.sender.replaceTrack(track);
+    };
+
     const ensureMic = async () => {
-      if (streamRef.current && streamRef.current.getAudioTracks().some((t) => t.readyState === "live")) {
-        return streamRef.current;
-      }
+      const currentTrack = streamRef.current?.getAudioTracks().find((track) => track.readyState === "live");
+      if (currentTrack) return streamRef.current;
+
       try {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
-        stream.getAudioTracks().forEach((t) => {
-          t.enabled = talkingRef.current;
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = talkingRef.current;
         });
         streamRef.current = stream;
-        setState((s) => ({ ...s, micReady: true, error: null }));
-        // Si ya había peers creados sin micrófono, se les adjunta ahora.
-        for (const peer of peers.values()) attachLocalTrack(peer);
+        for (const peer of peers.values()) attachCurrentMic(peer);
+        setState((current) => ({ ...current, micReady: true, error: null }));
         return stream;
       } catch {
-        setState((s) => ({ ...s, micReady: false, error: "Permite el micrófono para hablar" }));
+        setState((current) => ({ ...current, micReady: false, error: "Permite el micrófono para hablar" }));
         return null;
-      }
-    };
-
-    const attachLocalTrack = (peer: Peer) => {
-      const track = streamRef.current?.getAudioTracks()[0];
-      if (!track || !peer.sender) return;
-      if (peer.sender.track !== track) void peer.sender.replaceTrack(track);
-    };
-
-    const createPeer = (peerId: string) => {
-      const existing = peers.get(peerId);
-      if (existing) return existing;
-
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      const audio = new Audio();
-      audio.autoplay = true;
-      audio.setAttribute("playsinline", "true");
-
-      const peer: Peer = {
-        pc,
-        audio,
-        polite: userId > peerId,
-        makingOffer: false,
-        sender: null,
-        restartedAt: 0,
-      };
-      peers.set(peerId, peer);
-      setPeerCount();
-
-      // Un único canal de audio bidireccional en ambos lados: así el audio
-      // viaja siempre en las dos direcciones sin renegociaciones extra.
-      const track = streamRef.current?.getAudioTracks()[0];
-      const tx = pc.addTransceiver(track ?? "audio", { direction: "sendrecv" });
-      peer.sender = tx.sender;
-      attachLocalTrack(peer);
-
-
-      pc.ontrack = (ev) => {
-        const [remote] = ev.streams;
-        audio.srcObject = remote ?? new MediaStream([ev.track]);
-        void audio.play().catch(() => {
-          /* se reintenta con el próximo gesto del usuario */
-        });
-      };
-
-      pc.onicecandidate = (ev) => {
-        if (ev.candidate) send({ from: userId, to: peerId, kind: "ice", data: ev.candidate.toJSON() });
-      };
-
-      pc.onnegotiationneeded = async () => {
-        try {
-          peer.makingOffer = true;
-          await pc.setLocalDescription();
-          send({ from: userId, to: peerId, kind: "offer", data: pc.localDescription });
-        } catch {
-          /* ignorar */
-        } finally {
-          peer.makingOffer = false;
-        }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === "disconnected") tryIceRestart(peerId, peer);
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") {
-          // Se recrea desde cero en el próximo ciclo de reconciliación.
-          removePeer(peerId);
-        } else if (pc.connectionState === "closed") {
-          removePeer(peerId);
-        }
-      };
-
-      return peer;
-    };
-
-    const tryIceRestart = (peerId: string, peer: Peer) => {
-      if (peer.polite) return; // solo el lado impolite reinicia para evitar choques
-      const now = Date.now();
-      if (now - peer.restartedAt < 4000) return;
-      peer.restartedAt = now;
-      try {
-        peer.pc.restartIce();
-      } catch {
-        removePeer(peerId);
       }
     };
 
@@ -195,103 +117,206 @@ export function useLiveVoice(options: {
       if (!peer) return;
       peer.pc.onicecandidate = null;
       peer.pc.ontrack = null;
-      peer.pc.onnegotiationneeded = null;
       peer.pc.onconnectionstatechange = null;
-      peer.pc.oniceconnectionstatechange = null;
       try {
         peer.pc.close();
       } catch {
-        /* ya cerrado */
+        // La conexión ya estaba cerrada.
       }
+      peer.audio.pause();
       peer.audio.srcObject = null;
+      peer.audio.remove();
       peers.delete(peerId);
-      setPeerCount();
+      updateConnectedPeers();
+    };
+
+    const flushIce = async (peer: Peer) => {
+      if (!peer.pc.remoteDescription) return;
+      const pending = peer.pendingIce.splice(0);
+      for (const candidate of pending) {
+        try {
+          await peer.pc.addIceCandidate(candidate);
+        } catch {
+          // Candidato de una conexión anterior; la reconciliación la reemplaza.
+        }
+      }
+    };
+
+    const createPeer = (peerId: string, initiator: boolean, requestedCallId?: string) => {
+      const existing = peers.get(peerId);
+      if (existing) return existing;
+
+      const callId = requestedCallId ?? crypto.randomUUID();
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const audio = document.createElement("audio");
+      audio.autoplay = true;
+      audio.controls = false;
+      audio.setAttribute("playsinline", "true");
+      audio.style.display = "none";
+      document.body.appendChild(audio);
+
+      // Ambos teléfonos crean exactamente una vía bidireccional. Solamente el
+      // identificador menor genera la oferta, evitando ofertas cruzadas en iOS.
+      const transceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+      const peer: Peer = {
+        pc,
+        audio,
+        sender: transceiver.sender,
+        callId,
+        initiator,
+        pendingIce: [],
+        disconnectedAt: null,
+      };
+      peers.set(peerId, peer);
+      attachCurrentMic(peer);
+
+      pc.ontrack = ({ streams, track }) => {
+        audio.srcObject = streams[0] ?? new MediaStream([track]);
+        audio.muted = false;
+        void audio.play().catch(() => {
+          // Safari reintentará durante el próximo gesto del usuario.
+        });
+      };
+
+      pc.onicecandidate = ({ candidate }) => {
+        if (!candidate) return;
+        send({ from: userId, to: peerId, callId: peer.callId, kind: "ice", data: candidate.toJSON() });
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          peer.disconnectedAt = null;
+          void audio.play().catch(() => {});
+        } else if (pc.connectionState === "disconnected" && peer.disconnectedAt === null) {
+          peer.disconnectedAt = Date.now();
+        } else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+          removePeer(peerId);
+        }
+        updateConnectedPeers();
+      };
+
+      return peer;
+    };
+
+    const makeOffer = async (peerId: string) => {
+      const peer = peers.get(peerId);
+      if (!peer || !peer.initiator || peer.pc.signalingState !== "stable") return;
+      try {
+        attachCurrentMic(peer);
+        const offer = await peer.pc.createOffer();
+        await peer.pc.setLocalDescription(offer);
+        if (peer.pc.localDescription) {
+          send({ from: userId, to: peerId, callId: peer.callId, kind: "offer", data: peer.pc.localDescription });
+        }
+      } catch {
+        removePeer(peerId);
+      }
     };
 
     const handleSignal = async (payload: SignalPayload) => {
-      if (payload.to !== userId || payload.from === userId) return;
-      const peer = createPeer(payload.from);
-      const { pc } = peer;
+      if (payload.to !== userId || payload.from === userId || disposed) return;
 
-      try {
-        if (payload.kind === "offer") {
-          const offerCollision = pc.signalingState !== "stable" || peer.makingOffer;
-          if (offerCollision && !peer.polite) return;
-          if (offerCollision) await pc.setLocalDescription({ type: "rollback" } as RTCLocalSessionDescriptionInit);
-          await pc.setRemoteDescription(new RTCSessionDescription(payload.data as RTCSessionDescriptionInit));
-          attachLocalTrack(peer);
-          await pc.setLocalDescription();
-          send({ from: userId, to: payload.from, kind: "answer", data: pc.localDescription });
-        } else if (payload.kind === "answer") {
-          if (pc.signalingState === "have-local-offer") {
-            await pc.setRemoteDescription(new RTCSessionDescription(payload.data as RTCSessionDescriptionInit));
+      if (payload.kind === "offer") {
+        let peer = peers.get(payload.from);
+        if (peer && peer.callId !== payload.callId) {
+          removePeer(payload.from);
+          peer = undefined;
+        }
+        if (!peer) peer = createPeer(payload.from, false, payload.callId);
+        try {
+          await peer.pc.setRemoteDescription(payload.data as RTCSessionDescriptionInit);
+          await flushIce(peer);
+          attachCurrentMic(peer);
+          const answer = await peer.pc.createAnswer();
+          await peer.pc.setLocalDescription(answer);
+          if (peer.pc.localDescription) {
+            send({ from: userId, to: payload.from, callId: peer.callId, kind: "answer", data: peer.pc.localDescription });
           }
-        } else if (payload.kind === "ice") {
-          await pc.addIceCandidate(new RTCIceCandidate(payload.data as RTCIceCandidateInit));
+        } catch {
+          removePeer(payload.from);
+        }
+        return;
+      }
+
+      const peer = peers.get(payload.from);
+      if (!peer || peer.callId !== payload.callId) return;
+      try {
+        if (payload.kind === "answer") {
+          if (peer.pc.signalingState === "have-local-offer") {
+            await peer.pc.setRemoteDescription(payload.data as RTCSessionDescriptionInit);
+            await flushIce(peer);
+          }
+        } else {
+          const candidate = payload.data as RTCIceCandidateInit;
+          if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(candidate);
+          else peer.pendingIce.push(candidate);
         }
       } catch {
-        /* señal fuera de orden: se recupera en la próxima negociación */
+        // Una señal tardía no debe destruir una conexión que sí está activa.
       }
     };
 
     const reconcile = () => {
-      const rt = rtRef.current;
-      if (!rt || disposed) return;
-      const ids = Object.keys(rt.presenceState());
+      const realtime = rtRef.current;
+      if (!realtime || !subscribed || disposed) return;
+      const presentIds = Object.keys(realtime.presenceState());
 
-      // Cierra peers que ya no están presentes.
-      for (const id of Array.from(peers.keys())) {
-        if (!ids.includes(id)) removePeer(id);
+      for (const peerId of Array.from(peers.keys())) {
+        if (!presentIds.includes(peerId)) removePeer(peerId);
       }
 
-      for (const id of ids) {
-        if (id === userId) continue;
-        const peer = peers.get(id);
+      for (const peerId of presentIds) {
+        if (peerId === userId) continue;
+        const peer = peers.get(peerId);
         if (!peer) {
-          // El id menor inicia la oferta para evitar colisiones.
-          if (userId < id) createPeer(id);
+          if (userId < peerId) {
+            createPeer(peerId, true);
+            void makeOffer(peerId);
+          }
           continue;
         }
-        attachLocalTrack(peer);
-        if (peer.pc.connectionState === "failed" || peer.pc.connectionState === "closed") {
-          removePeer(id);
-          if (userId < id) createPeer(id);
+        attachCurrentMic(peer);
+        if (peer.disconnectedAt && Date.now() - peer.disconnectedAt > RESTART_AFTER_MS) {
+          removePeer(peerId);
+          if (userId < peerId) {
+            createPeer(peerId, true);
+            void makeOffer(peerId);
+          }
         }
       }
 
-      // Reafirma la presencia propia por si el socket se reconectó.
-      void rt.track({ name: nameRef.current, at: Date.now() });
+      void realtime.track({ name: nameRef.current, at: Date.now() });
+      updateConnectedPeers();
     };
 
     const boot = async () => {
       await ensureMic();
       if (disposed) return;
 
-      const rt = supabase.channel(`rtc-${channelId}`, {
-        config: { presence: { key: userId }, broadcast: { self: false } },
+      const realtime = supabase.channel(`rtc-${channelId}`, {
+        config: { presence: { key: userId }, broadcast: { self: false, ack: true } },
       });
-      rtRef.current = rt;
-
-      rt.on("broadcast", { event: "signal" }, ({ payload }) => {
-        void handleSignal(payload as SignalPayload);
+      rtRef.current = realtime;
+      realtime.on("broadcast", { event: "signal" }, ({ payload }) => void handleSignal(payload as SignalPayload));
+      realtime.on("broadcast", { event: "talk" }, ({ payload }) => {
+        const talk = payload as { from: string; name: string; on: boolean };
+        if (talk.from === userId) return;
+        setState((current) => ({
+          ...current,
+          speaker: talk.on ? talk.name : current.speaker === talk.name ? null : current.speaker,
+        }));
       });
-
-      rt.on("broadcast", { event: "talk" }, ({ payload }) => {
-        const p = payload as { from: string; name: string; on: boolean };
-        if (p.from === userId) return;
-        setState((s) => ({ ...s, speaker: p.on ? p.name : s.speaker === p.name ? null : s.speaker }));
-      });
-
-      rt.on("presence", { event: "sync" }, () => reconcile());
-      rt.on("presence", { event: "join" }, () => reconcile());
-      rt.on("presence", { event: "leave" }, () => reconcile());
-
-      rt.subscribe((status) => {
+      realtime.on("presence", { event: "sync" }, reconcile);
+      realtime.on("presence", { event: "join" }, reconcile);
+      realtime.on("presence", { event: "leave" }, reconcile);
+      realtime.subscribe((status) => {
         if (status === "SUBSCRIBED") {
-          setState((s) => ({ ...s, connected: true }));
-          void rt.track({ name: nameRef.current, at: Date.now() });
+          subscribed = true;
+          setState((current) => ({ ...current, connected: true }));
+          void realtime.track({ name: nameRef.current, at: Date.now() });
         } else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setState((s) => ({ ...s, connected: false }));
+          subscribed = false;
+          setState((current) => ({ ...current, connected: false, peerCount: 0 }));
         }
       });
 
@@ -304,48 +329,44 @@ export function useLiveVoice(options: {
     void boot();
 
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        void ensureMic();
-        reconcile();
-      }
+      if (document.visibilityState !== "visible") return;
+      void ensureMic();
+      for (const peer of peers.values()) void peer.audio.play().catch(() => {});
+      reconcile();
     };
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       disposed = true;
+      subscribed = false;
       document.removeEventListener("visibilitychange", onVisible);
       if (reconcileTimer) clearInterval(reconcileTimer);
-      for (const id of Array.from(peers.keys())) removePeer(id);
+      for (const peerId of Array.from(peers.keys())) removePeer(peerId);
       if (rtRef.current) void supabase.removeChannel(rtRef.current);
       rtRef.current = null;
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       talkingRef.current = false;
       setState({ connected: false, peerCount: 0, speaker: null, micReady: false, error: null });
     };
-  }, [channelId, enabled, userId, setPeerCount]);
+  }, [channelId, enabled, userId, updateConnectedPeers]);
 
   const resumeAudio = useCallback(() => {
     for (const peer of peersRef.current.values()) {
-      const el = peer.audio;
-      if (el.paused || el.readyState === 0) {
-        void el.play().catch(() => {
-          /* aún bloqueado */
-        });
-      }
+      peer.audio.muted = false;
+      void peer.audio.play().catch(() => {});
     }
   }, []);
 
   const startTransmit = useCallback(async () => {
     const stream = streamRef.current;
-    if (!stream || !stream.getAudioTracks().some((t) => t.readyState === "live")) {
-      setState((s) => ({ ...s, error: "Micrófono no disponible" }));
-      return false;
-    }
+    const track = stream?.getAudioTracks().find((item) => item.readyState === "live");
+    const hasConnectedPeer = Array.from(peersRef.current.values()).some(
+      (peer) => peer.pc.connectionState === "connected",
+    );
+    if (!track || !hasConnectedPeer) return false;
     talkingRef.current = true;
-    stream.getAudioTracks().forEach((t) => {
-      t.enabled = true;
-    });
+    track.enabled = true;
     void rtRef.current?.send({
       type: "broadcast",
       event: "talk",
@@ -356,8 +377,8 @@ export function useLiveVoice(options: {
 
   const stopTransmit = useCallback(() => {
     talkingRef.current = false;
-    streamRef.current?.getAudioTracks().forEach((t) => {
-      t.enabled = false;
+    streamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = false;
     });
     void rtRef.current?.send({
       type: "broadcast",
