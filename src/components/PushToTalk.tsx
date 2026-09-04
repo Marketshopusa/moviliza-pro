@@ -479,13 +479,14 @@ export function PushToTalk() {
         <p className="text-panel-foreground/60 text-[9px] font-bold uppercase tracking-widest">Walkie-talkie</p>
       </div>
 
-      <div className="min-w-0">
+      <div className="min-w-0 self-center">
+        <p className="text-sm font-bold truncate leading-tight">{channel ? channel.name : "Sin canal"}</p>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="text-xs font-bold truncate text-left underline decoration-dotted underline-offset-4"
+          className="mt-1 text-[10px] font-bold uppercase tracking-widest underline decoration-dotted underline-offset-4"
         >
-          {channel ? channel.name : "Elegir canal"}
+          Canales
         </button>
         <p className="text-[9px] text-panel-foreground/60 mt-0.5 leading-tight">
           {recording
