@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Map as LeafletMap, Marker, Polyline } from "leaflet";
 
 export type MapPunto = {
@@ -32,6 +32,7 @@ export function RutaMapaLeaflet({
   const meRef = useRef<Marker | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
   const fittedRef = useRef(false);
+  const [ready, setReady] = useState(false);
 
   // Inicializa el mapa una sola vez (solo en el navegador).
   useEffect(() => {
@@ -42,6 +43,7 @@ export function RutaMapaLeaflet({
       leafletRef.current = L;
       const map = L.map(divRef.current, { zoomControl: true, attributionControl: false });
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20 }).addTo(map);
+      setReady(true);
       map.setView([28.431, -81.313], 15);
       mapRef.current = map;
       setTimeout(() => map.invalidateSize(), 200);
@@ -60,7 +62,7 @@ export function RutaMapaLeaflet({
   useEffect(() => {
     const L = leafletRef.current;
     const map = mapRef.current;
-    if (!L || !map) return;
+    if (!ready || !L || !map) return;
     for (const p of puntos) {
       let m = markersRef.current.get(p.code);
       const activo = origen?.code === p.code || destino?.code === p.code;
@@ -78,13 +80,13 @@ export function RutaMapaLeaflet({
         m.setIcon(icon);
       }
     }
-  }, [puntos, origen, destino]);
+  }, [ready, puntos, origen, destino]);
 
   // Línea de ruta con el color del terminal destino.
   useEffect(() => {
     const L = leafletRef.current;
     const map = mapRef.current;
-    if (!L || !map) return;
+    if (!ready || !L || !map) return;
     if (lineRef.current) {
       map.removeLayer(lineRef.current);
       lineRef.current = null;
@@ -105,13 +107,13 @@ export function RutaMapaLeaflet({
       map.fitBounds(bounds.pad(0.25));
       fittedRef.current = true;
     }
-  }, [origen, destino, yo]);
+  }, [ready, origen, destino, yo]);
 
   // Punto azul del conductor.
   useEffect(() => {
     const L = leafletRef.current;
     const map = mapRef.current;
-    if (!L || !map) return;
+    if (!ready || !L || !map) return;
     if (!yo) {
       if (meRef.current) {
         map.removeLayer(meRef.current);
@@ -134,7 +136,7 @@ export function RutaMapaLeaflet({
     } else {
       meRef.current.setLatLng([yo.lat, yo.lng]);
     }
-  }, [yo]);
+  }, [ready, yo]);
 
   return <div ref={divRef} className="rounded-xl overflow-hidden border border-border bg-card h-[380px] w-full z-0" />;
 }
