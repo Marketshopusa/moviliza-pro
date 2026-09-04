@@ -341,7 +341,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       }
     }
     setBusy(true);
-    const fotosLlegada = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
+    const todas = [...new Set([...fotos, ...(mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [])])];
     const { error: err } = await supabase
       .from("movements")
       .update({
