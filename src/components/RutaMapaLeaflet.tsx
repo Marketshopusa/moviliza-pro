@@ -32,6 +32,7 @@ export function RutaMapaLeaflet({
   const meRef = useRef<Marker | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
   const fittedRef = useRef(false);
+  const [ready, setReady] = useState(false);
 
   // Inicializa el mapa una sola vez (solo en el navegador).
   useEffect(() => {
@@ -42,6 +43,7 @@ export function RutaMapaLeaflet({
       leafletRef.current = L;
       const map = L.map(divRef.current, { zoomControl: true, attributionControl: false });
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20 }).addTo(map);
+      setReady(true);
       map.setView([28.431, -81.313], 15);
       mapRef.current = map;
       setTimeout(() => map.invalidateSize(), 200);
