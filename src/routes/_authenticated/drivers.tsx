@@ -133,12 +133,25 @@ function RutaFlow({ mode }: { mode: Mode }) {
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition(
-      (pos) => setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 20_000 },
+    const ids: number[] = [];
+    const ok = (pos: GeolocationPosition) =>
+      setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    ids.push(
+      navigator.geolocation.watchPosition(
+        ok,
+        () => {
+          // Si el GPS de alta precisión falla (interiores), seguimos con precisión normal.
+          ids.push(
+            navigator.geolocation.watchPosition(ok, () => {}, {
+              enableHighAccuracy: false,
+              maximumAge: 60_000,
+            }),
+          );
+        },
+        { enableHighAccuracy: true, maximumAge: 20_000 },
+      ),
     );
-    return () => navigator.geolocation.clearWatch(id);
+    return () => ids.forEach((id) => navigator.geolocation.clearWatch(id));
   }, []);
 
   /** Guarda en el sistema cualquier foto tomada (también las usadas para escanear). */

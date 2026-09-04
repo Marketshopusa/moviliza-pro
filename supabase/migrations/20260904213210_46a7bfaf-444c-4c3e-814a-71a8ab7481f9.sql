@@ -1,0 +1,1 @@
+CREATE POLICY "vehicle_photos_update_own" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'vehicle-photos' AND owner = auth.uid()) WITH CHECK (bucket_id = 'vehicle-photos' AND owner = auth.uid());

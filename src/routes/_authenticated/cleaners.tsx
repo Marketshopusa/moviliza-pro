@@ -36,9 +36,18 @@ function getPosition(): Promise<{ lat: number; lng: number }> {
       reject(new Error("Este teléfono no tiene GPS disponible."));
       return;
     }
+    const ok = (pos: GeolocationPosition) =>
+      resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => reject(new Error("Activa el GPS del teléfono para guardar la ubicación.")),
+      ok,
+      () => {
+        // Reintento con precisión normal si el modo preciso no responde.
+        navigator.geolocation.getCurrentPosition(
+          ok,
+          () => reject(new Error("Activa el GPS del teléfono para guardar la ubicación.")),
+          { enableHighAccuracy: false, timeout: 20000, maximumAge: 60_000 },
+        );
+      },
       { enableHighAccuracy: true, timeout: 15000 },
     );
   });
