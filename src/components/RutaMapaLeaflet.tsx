@@ -82,32 +82,57 @@ export function RutaMapaLeaflet({
     }
   }, [ready, puntos, origen, destino]);
 
-  // Línea de ruta con el color del terminal destino.
+  // Ruta real por calles (OSRM). Si el servicio falla, se dibuja la línea directa.
   useEffect(() => {
     const L = leafletRef.current;
     const map = mapRef.current;
     if (!ready || !L || !map) return;
+    let cancelled = false;
+
     if (lineRef.current) {
       map.removeLayer(lineRef.current);
       lineRef.current = null;
     }
-    if (origen && destino) {
-      lineRef.current = L.polyline(
-        [
-          [origen.lat, origen.lng],
-          [destino.lat, destino.lng],
-        ],
-        { color: destino.code === "X" ? origen.line : destino.line, weight: 5, opacity: 0.9 },
-      ).addTo(map);
-      const bounds = L.latLngBounds([
-        [origen.lat, origen.lng],
-        [destino.lat, destino.lng],
-        ...(yo ? ([[yo.lat, yo.lng]] as [number, number][]) : []),
-      ]);
-      map.fitBounds(bounds.pad(0.25));
+    if (!origen || !destino) return;
+
+    const color = destino.code === "X" ? origen.line : destino.line;
+    const recta: [number, number][] = [
+      [origen.lat, origen.lng],
+      [destino.lat, destino.lng],
+    ];
+
+    function dibujar(coords: [number, number][]) {
+      if (cancelled || !L || !map) return;
+      if (lineRef.current) map.removeLayer(lineRef.current);
+      lineRef.current = L.polyline(coords, { color, weight: 6, opacity: 0.9 }).addTo(map);
+      const bounds = L.latLngBounds([...coords, ...(yo ? ([[yo.lat, yo.lng]] as [number, number][]) : [])]);
+      map.fitBounds(bounds.pad(0.2));
       fittedRef.current = true;
     }
+
+    dibujar(recta);
+
+    void (async () => {
+      try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${origen.lng},${origen.lat};${destino.lng},${destino.lat}?overview=full&geometries=geojson`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          routes?: { geometry?: { coordinates?: [number, number][] } }[];
+        };
+        const coords = json.routes?.[0]?.geometry?.coordinates;
+        if (!coords || coords.length < 2) return;
+        dibujar(coords.map(([lng, lat]) => [lat, lng] as [number, number]));
+      } catch {
+        /* se conserva la línea directa */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [ready, origen, destino, yo]);
+
 
   // Punto azul del conductor.
   useEffect(() => {

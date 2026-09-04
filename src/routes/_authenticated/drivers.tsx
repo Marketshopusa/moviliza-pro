@@ -36,8 +36,14 @@ const PUNTOS: Record<Code, Punto> = {
   C: { code: "C", label: "Terminal C", lat: 28.4130398, lng: -81.3093816, color: "bg-blue-500", text: "text-white", ring: "ring-blue-300", line: "#3b82f6" },
 };
 
-/** Radio permitido para confirmar llegada (metros). */
-const RADIO_M = 50;
+/**
+ * Radio permitido para confirmar llegada (metros).
+ * La base X es un lote grande y los terminales tienen varios niveles de parqueo,
+ * por eso cada punto tiene su propio radio.
+ */
+const RADIO_POR_PUNTO: Record<Code, number> = { X: 300, A: 150, B: 150, C: 150 };
+/** Tolerancia extra según la precisión que reporte el teléfono. */
+const TOLERANCIA_MAX_M = 120;
 
 function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
@@ -86,6 +92,7 @@ type Servicio = (typeof SERVICIOS)[number];
 function RutaFlow({ mode }: { mode: Mode }) {
   const { user } = useAuth();
   const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
   const [plateState, setPlateState] = useState("FL");
   const [plate, setPlate] = useState("");
   const [model, setModel] = useState("");
@@ -134,8 +141,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
     const ids: number[] = [];
-    const ok = (pos: GeolocationPosition) =>
+    const ok = (pos: GeolocationPosition) => {
       setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      setAccuracy(pos.coords.accuracy ?? null);
+    };
     ids.push(
       navigator.geolocation.watchPosition(
         ok,
@@ -326,7 +335,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
   }
 
   const distancia = position && meta ? distanciaM(position, meta) : null;
-  const enSitio = distancia !== null && distancia <= RADIO_M;
+  const radioPermitido = meta
+    ? RADIO_POR_PUNTO[meta.code] + Math.min(accuracy ?? 0, TOLERANCIA_MAX_M)
+    : 0;
+  const enSitio = distancia !== null && distancia <= radioPermitido;
   const coincide =
     !!spot && !!verifSpot && spot === verifSpot && (!verifTerminal || verifTerminal === terminalEsperado);
 
