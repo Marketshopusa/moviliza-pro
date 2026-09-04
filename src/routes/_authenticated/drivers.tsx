@@ -98,6 +98,9 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [movementId, setMovementId] = useState<string | null>(null);
 
+  // Última ubicación guardada del vehículo en Base X (registrada por cleaners).
+  const [vehPos, setVehPos] = useState<VehiclePosition | null>(null);
+
   // Retorno: servicio elegido y sus dos fotos (ubicación del carro y llave).
   const [servicio, setServicio] = useState<Servicio | null>(null);
   const [pendiente, setPendiente] = useState<Servicio | null>(null);
@@ -118,6 +121,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const llaveRef = useRef<HTMLInputElement>(null);
   const readCard = useServerFn(readVehicleCard);
   const readSpot = useServerFn(readParkingPhoto);
+  const fetchVehPos = useServerFn(getVehiclePosition);
 
   // En salida el destino es el terminal; en retorno el destino es la base X.
   const origen = mode === "salida" ? PUNTOS.X : terminal ? PUNTOS[terminal] : null;
