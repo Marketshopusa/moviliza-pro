@@ -6,6 +6,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard } from "@/lib/vehicle-card.functions";
 import { cn } from "@/lib/utils";
 import { ShiftPanel } from "@/components/ShiftPanel";
+import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -34,7 +35,7 @@ const PUNTOS: Record<Code, Punto> = {
 };
 
 /** Radio permitido para confirmar llegada (metros). */
-const RADIO_M = 200;
+const RADIO_M = 50;
 
 function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
@@ -215,7 +216,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
 
   return (
     <section className="space-y-4">
-      <RutaMapa origen={origen} destino={destino} yo={position} />
+      <RutaMapaLeaflet puntos={Object.values(PUNTOS)} origen={origen} destino={destino} yo={position} />
 
       <div className="bg-card border border-border rounded-xl p-4 space-y-4">
         <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
@@ -341,74 +342,6 @@ function RutaFlow({ mode }: { mode: Mode }) {
   );
 }
 
-/** Mapa con la ruta pintada del color del terminal. */
-function RutaMapa({
-  origen,
-  destino,
-  yo,
-}: {
-  origen: Punto | null;
-  destino: Punto | null;
-  yo: { lat: number; lng: number } | null;
-}) {
-  const pts = [origen, destino].filter(Boolean) as Punto[];
-  const lats = [...pts.map((p) => p.lat), ...(yo ? [yo.lat] : [])];
-  const lngs = [...pts.map((p) => p.lng), ...(yo ? [yo.lng] : [])];
-  const pad = 0.006;
-  const minLat = (lats.length ? Math.min(...lats) : 28.42) - pad;
-  const maxLat = (lats.length ? Math.max(...lats) : 28.46) + pad;
-  const minLng = (lngs.length ? Math.min(...lngs) : -81.33) - pad;
-  const maxLng = (lngs.length ? Math.max(...lngs) : -81.3) + pad;
-
-  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${minLng}%2C${minLat}%2C${maxLng}%2C${maxLat}&layer=mapnik`;
-  const xy = (p: { lat: number; lng: number }) => ({
-    x: ((p.lng - minLng) / (maxLng - minLng)) * 100,
-    y: ((maxLat - p.lat) / (maxLat - minLat)) * 100,
-  });
-
-  return (
-    <div className="relative rounded-xl overflow-hidden border border-border bg-card h-[380px]">
-      <iframe title="Mapa de ruta" src={src} className="w-full h-full" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 w-full h-full">
-        {origen && destino && (
-          <line
-            x1={xy(origen).x}
-            y1={xy(origen).y}
-            x2={xy(destino).x}
-            y2={xy(destino).y}
-            stroke={destino.code === "X" ? origen.line : destino.line}
-            strokeWidth={1.2}
-            strokeLinecap="round"
-          />
-        )}
-      </svg>
-      <div className="pointer-events-none absolute inset-0">
-        {pts.map((p) => {
-          const c = xy(p);
-          return (
-            <span
-              key={p.code}
-              style={{ left: `${c.x}%`, top: `${c.y}%` }}
-              className={cn(
-                "absolute -translate-x-1/2 -translate-y-1/2 size-7 rounded-full border-2 border-white shadow flex items-center justify-center text-[11px] font-bold",
-                p.color,
-                p.text,
-              )}
-            >
-              {p.code}
-            </span>
-          );
-        })}
-        {yo && (
-          <span
-            style={{ left: `${xy(yo).x}%`, top: `${xy(yo).y}%` }}
-            className="absolute -translate-x-1/2 -translate-y-1/2 size-3 rounded-full bg-sky-500 border-2 border-white shadow"
-          />
-        )}
-      </div>
-    </div>
-  );
-}
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
