@@ -241,6 +241,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
       const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
       if (upErr) throw new Error(upErr.message);
+      setFotos((prev) => [...prev, path]);
       if (kind === "ubicacion") {
         setFotoUbicacion(path);
         setSubiendo(null);
