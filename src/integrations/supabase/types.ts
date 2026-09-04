@@ -276,6 +276,42 @@ export type Database = {
         }
         Relationships: []
       }
+      vehicle_positions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          latitude: number
+          longitude: number
+          photo_path: string | null
+          plate: string
+          plate_state: string | null
+          vehicle_model: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          latitude: number
+          longitude: number
+          photo_path?: string | null
+          plate: string
+          plate_state?: string | null
+          vehicle_model?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          latitude?: number
+          longitude?: number
+          photo_path?: string | null
+          plate?: string
+          plate_state?: string | null
+          vehicle_model?: string | null
+        }
+        Relationships: []
+      }
       vehicles: {
         Row: {
           created_at: string

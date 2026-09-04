@@ -4,9 +4,11 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard, readParkingPhoto } from "@/lib/vehicle-card.functions";
+import { getVehiclePosition, type VehiclePosition } from "@/lib/vehicle-positions.functions";
 import { cn } from "@/lib/utils";
 import { ShiftPanel } from "@/components/ShiftPanel";
 import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
+import { VehicleSpotMap } from "@/components/VehicleSpotMap";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -96,6 +98,9 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [movementId, setMovementId] = useState<string | null>(null);
 
+  // Última ubicación guardada del vehículo en Base X (registrada por cleaners).
+  const [vehPos, setVehPos] = useState<VehiclePosition | null>(null);
+
   // Retorno: servicio elegido y sus dos fotos (ubicación del carro y llave).
   const [servicio, setServicio] = useState<Servicio | null>(null);
   const [pendiente, setPendiente] = useState<Servicio | null>(null);
@@ -116,6 +121,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const llaveRef = useRef<HTMLInputElement>(null);
   const readCard = useServerFn(readVehicleCard);
   const readSpot = useServerFn(readParkingPhoto);
+  const fetchVehPos = useServerFn(getVehiclePosition);
 
   // En salida el destino es el terminal; en retorno el destino es la base X.
   const origen = mode === "salida" ? PUNTOS.X : terminal ? PUNTOS[terminal] : null;
@@ -151,6 +157,15 @@ function RutaFlow({ mode }: { mode: Mode }) {
           .eq("plate", res.plate)
           .maybeSingle();
         if (veh?.vehicle_model) setModel(veh.vehicle_model);
+      }
+      if (res.plate) {
+        try {
+          setVehPos(await fetchVehPos({ data: { plate: res.plate } }));
+        } catch {
+          setVehPos(null);
+        }
+      } else {
+        setVehPos(null);
       }
       const partes: string[] = [];
       if (res.plate) partes.push(`${res.plate_state ?? ""} ${res.plate}`.trim());
@@ -328,6 +343,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setTerminal(null);
       setRevisado(false);
       setMovementId(null);
+      setVehPos(null);
       setSpot("");
       setVerifSpot("");
       setVerifTerminal(null);
@@ -415,6 +431,26 @@ function RutaFlow({ mode }: { mode: Mode }) {
               className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
             />
           </div>
+
+          {vehPos && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                Ubicación del vehículo en Base X ·{" "}
+                {new Date(vehPos.created_at).toLocaleString("es-US", { dateStyle: "short", timeStyle: "short" })}
+              </p>
+              <VehicleSpotMap
+                lat={vehPos.latitude}
+                lng={vehPos.longitude}
+                label={`${vehPos.plate_state ?? ""} ${vehPos.plate}`.trim()}
+                yo={position}
+              />
+              {position && (
+                <p className="text-[10px] text-center font-bold uppercase tracking-widest text-muted-foreground">
+                  El vehículo está a {Math.round(distanciaM(position, { lat: vehPos.latitude, lng: vehPos.longitude }))} m de ti
+                </p>
+              )}
+            </div>
+          )}
 
           {mode === "salida" && (
             <button
