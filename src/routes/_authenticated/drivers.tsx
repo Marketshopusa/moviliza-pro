@@ -141,11 +141,31 @@ function RutaFlow({ mode }: { mode: Mode }) {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
+  /** Guarda en el sistema cualquier foto tomada (también las usadas para escanear). */
+  async function archivarFoto(file: File, kind: string): Promise<string | null> {
+    if (!user) return null;
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
+      if (upErr) return null;
+      setFotos((prev) => [...prev, path]);
+      if (movementId) {
+        const nuevas = [...fotos, path];
+        void supabase.from("movements").update({ photos: nuevas, photo_path: nuevas[0] }).eq("id", movementId);
+      }
+      return path;
+    } catch {
+      return null;
+    }
+  }
+
   async function handleCard(file: File) {
     setScanning(true);
     setScanMsg(null);
     setError(null);
     try {
+      void archivarFoto(file, "tarjeta");
       const dataUrl = await fileToDataUrl(file);
       const res = await readCard({ data: { image: dataUrl } });
       if (res.plate) setPlate(res.plate);
