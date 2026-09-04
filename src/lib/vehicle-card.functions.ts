@@ -62,10 +62,24 @@ export const readVehicleCard = createServerFn({ method: "POST" })
       parsed = {};
     }
     const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null);
+    const colorRaw = (str(parsed["card_color"]) ?? "").toLowerCase();
+    const color: CardRead["card_color"] = colorRaw.includes("amarill")
+      ? "amarillo"
+      : colorRaw.includes("verde")
+        ? "verde"
+        : colorRaw.includes("azul")
+          ? "azul"
+          : colorRaw.includes("negro")
+            ? "negro"
+            : null;
+    const terminal: CardRead["terminal"] =
+      color === "amarillo" ? "A" : color === "verde" ? "B" : color === "azul" ? "C" : color === "negro" ? "X" : null;
     return {
       plate_state: str(parsed["plate_state"]),
       plate: str(parsed["plate"])?.replace(/[^A-Z0-9]/g, "") ?? null,
       vehicle_model: str(parsed["vehicle_model"]),
+      card_color: color,
+      terminal,
       raw,
     };
   });
