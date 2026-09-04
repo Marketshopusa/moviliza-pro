@@ -316,6 +316,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setSpot("");
       setVerifSpot("");
       setVerifTerminal(null);
+      setServicio(null);
+      setPendiente(null);
+      setFotoUbicacion(null);
+      setFotoLlave(null);
     }
   }
 
