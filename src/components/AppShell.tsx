@@ -2,7 +2,7 @@ import { Link, Outlet } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useAuth, type AppRole } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
-import { useLocationBeacon, markOffShift } from "@/lib/geo";
+import { useLocationBeacon } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
@@ -30,10 +30,6 @@ export function AppShell({ children }: { children?: ReactNode }) {
     };
   }, [profile?.avatar_url]);
 
-  async function salir() {
-    if (user) await markOffShift(user.id).catch(() => {});
-    await supabase.auth.signOut();
-  }
 
   const perfilIncompleto = !!profile && (!profile.avatar_url || !profile.initials);
 
