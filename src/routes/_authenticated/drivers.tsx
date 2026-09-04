@@ -4,9 +4,11 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard, readParkingPhoto } from "@/lib/vehicle-card.functions";
+import { getVehiclePosition, type VehiclePosition } from "@/lib/vehicle-positions.functions";
 import { cn } from "@/lib/utils";
 import { ShiftPanel } from "@/components/ShiftPanel";
 import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
+import { VehicleSpotMap } from "@/components/VehicleSpotMap";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({

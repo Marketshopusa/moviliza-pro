@@ -80,6 +80,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
         <div className="mx-auto max-w-5xl flex justify-around">
           <NavItem to="/app" label="DAW" />
           <NavItem to="/drivers" label="DRIVERS" />
+          <NavItem to="/cleaners" label="CLEANERS" />
           <NavItem to="/movimientos" label="Historial" />
           <NavItem to="/perfil" label="Perfil" />
           {isSupervisor && <NavItem to="/panel" label="Panel" />}

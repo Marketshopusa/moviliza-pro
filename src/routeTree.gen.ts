@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
+import { Route as AuthenticatedCleanersRouteImport } from './routes/_authenticated/cleaners'
 import { Route as AuthenticatedDriversRouteImport } from './routes/_authenticated/drivers'
 import { Route as AuthenticatedMovimientosRouteImport } from './routes/_authenticated/movimientos'
 import { Route as AuthenticatedPanelRouteImport } from './routes/_authenticated/panel'
@@ -35,6 +36,11 @@ const AuthRoute = AuthRouteImport.update({
 const AuthenticatedAppRoute = AuthenticatedAppRouteImport.update({
   id: '/app',
   path: '/app',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedCleanersRoute = AuthenticatedCleanersRouteImport.update({
+  id: '/cleaners',
+  path: '/cleaners',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDriversRoute = AuthenticatedDriversRouteImport.update({
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRoute
+  '/cleaners': typeof AuthenticatedCleanersRoute
   '/drivers': typeof AuthenticatedDriversRoute
   '/movimientos': typeof AuthenticatedMovimientosRoute
   '/panel': typeof AuthenticatedPanelRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/app': typeof AuthenticatedAppRoute
+  '/cleaners': typeof AuthenticatedCleanersRoute
   '/drivers': typeof AuthenticatedDriversRoute
   '/movimientos': typeof AuthenticatedMovimientosRoute
   '/panel': typeof AuthenticatedPanelRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/app': typeof AuthenticatedAppRoute
+  '/_authenticated/cleaners': typeof AuthenticatedCleanersRoute
   '/_authenticated/drivers': typeof AuthenticatedDriversRoute
   '/_authenticated/movimientos': typeof AuthenticatedMovimientosRoute
   '/_authenticated/panel': typeof AuthenticatedPanelRoute
@@ -91,16 +100,31 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/auth' | '/app' | '/drivers' | '/movimientos' | '/panel' | '/perfil'
+    | '/'
+    | '/auth'
+    | '/app'
+    | '/cleaners'
+    | '/drivers'
+    | '/movimientos'
+    | '/panel'
+    | '/perfil'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/' | '/auth' | '/app' | '/drivers' | '/movimientos' | '/panel' | '/perfil'
+    | '/'
+    | '/auth'
+    | '/app'
+    | '/cleaners'
+    | '/drivers'
+    | '/movimientos'
+    | '/panel'
+    | '/perfil'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/app'
+    | '/_authenticated/cleaners'
     | '/_authenticated/drivers'
     | '/_authenticated/movimientos'
     | '/_authenticated/panel'
@@ -143,6 +167,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/cleaners': {
+      id: '/_authenticated/cleaners'
+      path: '/cleaners'
+      fullPath: '/cleaners'
+      preLoaderRoute: typeof AuthenticatedCleanersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/drivers': {
       id: '/_authenticated/drivers'
       path: '/drivers'
@@ -176,6 +207,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAppRoute: typeof AuthenticatedAppRoute
+  AuthenticatedCleanersRoute: typeof AuthenticatedCleanersRoute
   AuthenticatedDriversRoute: typeof AuthenticatedDriversRoute
   AuthenticatedMovimientosRoute: typeof AuthenticatedMovimientosRoute
   AuthenticatedPanelRoute: typeof AuthenticatedPanelRoute
@@ -184,6 +216,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAppRoute: AuthenticatedAppRoute,
+  AuthenticatedCleanersRoute: AuthenticatedCleanersRoute,
   AuthenticatedDriversRoute: AuthenticatedDriversRoute,
   AuthenticatedMovimientosRoute: AuthenticatedMovimientosRoute,
   AuthenticatedPanelRoute: AuthenticatedPanelRoute,
