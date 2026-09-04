@@ -6,6 +6,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard } from "@/lib/vehicle-card.functions";
 import { cn } from "@/lib/utils";
 import { ShiftPanel } from "@/components/ShiftPanel";
+import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -34,7 +35,7 @@ const PUNTOS: Record<Code, Punto> = {
 };
 
 /** Radio permitido para confirmar llegada (metros). */
-const RADIO_M = 200;
+const RADIO_M = 50;
 
 function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
