@@ -274,7 +274,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
     setBusy(true);
     setError(null);
-    const fotos: string[] = [];
+    
 
     const { data, error: err } = await supabase
       .from("movements")
