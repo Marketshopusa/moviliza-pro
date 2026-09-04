@@ -542,7 +542,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
           <button
             type="button"
             onClick={() => void iniciarRuta()}
-            disabled={busy || !plate || (mode === "salida" ? !terminal || !revisado : false)}
+            disabled={busy || !plate || !terminal || (mode === "salida" ? !revisado : false)}
 
             className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60"
           >
