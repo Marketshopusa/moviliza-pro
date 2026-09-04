@@ -105,18 +105,9 @@ export function useLiveVoice(options: {
     };
 
     const attachLocalTrack = (peer: Peer) => {
-      const stream = streamRef.current;
-      const track = stream?.getAudioTracks()[0];
-      if (!stream || !track) return;
-      if (peer.sender) {
-        if (peer.sender.track !== track) void peer.sender.replaceTrack(track);
-        return;
-      }
-      try {
-        peer.sender = peer.pc.addTrack(track, stream);
-      } catch {
-        /* la pista ya estaba adjunta */
-      }
+      const track = streamRef.current?.getAudioTracks()[0];
+      if (!track || !peer.sender) return;
+      if (peer.sender.track !== track) void peer.sender.replaceTrack(track);
     };
 
     const createPeer = (peerId: string) => {
@@ -139,9 +130,13 @@ export function useLiveVoice(options: {
       peers.set(peerId, peer);
       setPeerCount();
 
-      // Siempre existe un transceptor de recepción, aunque aún no haya micrófono.
-      pc.addTransceiver("audio", { direction: "recvonly" });
+      // Un único canal de audio bidireccional en ambos lados: así el audio
+      // viaja siempre en las dos direcciones sin renegociaciones extra.
+      const track = streamRef.current?.getAudioTracks()[0];
+      const tx = pc.addTransceiver(track ?? "audio", { direction: "sendrecv" });
+      peer.sender = tx.sender;
       attachLocalTrack(peer);
+
 
       pc.ontrack = (ev) => {
         const [remote] = ev.streams;
