@@ -430,82 +430,16 @@ function RutaFlow({ mode }: { mode: Mode }) {
           )}
 
           {mode === "retorno" && (
-            <div className="space-y-2">
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                ref={ubicacionRef}
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void subirFotoServicio(f, "ubicacion");
-                  e.currentTarget.value = "";
-                }}
-              />
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                ref={llaveRef}
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void subirFotoServicio(f, "llave");
-                  e.currentTarget.value = "";
-                }}
-              />
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                Servicio en la base · al elegir se abre la cámara (foto del carro y de la llave)
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {SERVICIOS.map((s) => {
-                  const activo = servicio === s;
-                  const enProceso = pendiente === s;
-                  const principal = s === "Limpieza general";
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => elegirServicio(s)}
-                      disabled={subiendo !== null}
-                      className={cn(
-                        "py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest border disabled:opacity-60",
-                        principal && "col-span-2",
-                        activo
-                          ? "bg-green-600 text-white border-green-600"
-                          : enProceso
-                            ? "bg-accent text-accent-foreground border-accent"
-                            : "bg-background text-muted-foreground border-border",
-                      )}
-                    >
-                      {enProceso
-                        ? subiendo === "llave"
-                          ? "Foto de la llave…"
-                          : "Foto del carro…"
-                        : activo
-                          ? `${s} ✓`
-                          : s}
-                    </button>
-                  );
-                })}
-              </div>
-              {servicio && (
-                <p className="text-center text-[11px] font-bold uppercase tracking-widest text-green-700 bg-green-600/10 rounded-lg p-2">
-                  {servicio} · fotos listas (carro + llave)
-                </p>
-              )}
-            </div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-center text-muted-foreground">
+              El área de la base se elige al llegar
+            </p>
           )}
 
           <button
             type="button"
             onClick={() => void iniciarRuta()}
-            disabled={
-              busy ||
-              !plate ||
-              (mode === "salida" ? !terminal || !revisado : !servicio)
-            }
+            disabled={busy || !plate || (mode === "salida" ? !terminal || !revisado : false)}
+
             className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60"
           >
             {busy ? "Guardando…" : "Iniciar ruta"}
