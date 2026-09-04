@@ -36,6 +36,7 @@ export function VehicleSpotMap({ lat, lng, label, yo }: Props) {
       cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
+      meRef.current = null;
     };
   }, [lat, lng, label]);
 
