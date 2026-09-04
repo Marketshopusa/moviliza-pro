@@ -216,7 +216,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
 
   return (
     <section className="space-y-4">
-      <RutaMapa origen={origen} destino={destino} yo={position} />
+      <RutaMapaLeaflet puntos={Object.values(PUNTOS)} origen={origen} destino={destino} yo={position} />
 
       <div className="bg-card border border-border rounded-xl p-4 space-y-4">
         <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
