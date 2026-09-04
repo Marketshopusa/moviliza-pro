@@ -34,6 +34,7 @@ type Row = {
   destination: SiteCode;
   dropoff_location: string | null;
   occurred_at: string;
+  photos: string[] | null;
 };
 
 type NoteRow = { id: string; driver_id: string; body: string; created_at: string };
@@ -147,7 +148,7 @@ function PanelPage() {
         supabase
           .from("movements")
           .select(
-            "id, movement_number, driver_id, plate_state, plate, vehicle_model, origin, destination, dropoff_location, occurred_at",
+            "id, movement_number, driver_id, plate_state, plate, vehicle_model, origin, destination, dropoff_location, occurred_at, photos",
           )
           .gte("occurred_at", start)
           .lte("occurred_at", end)
@@ -668,15 +669,18 @@ function PanelPage() {
                       Movimientos ({d.movements.length})
                     </p>
                     {d.movements.slice(0, 30).map((m) => (
-                      <div key={m.id} className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-mono truncate">
-                          #{String(m.movement_number).padStart(3, "0")} {m.plate_state}-{m.plate} ·{" "}
-                          {new Date(m.occurred_at).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" })}
-                          {m.dropoff_location ? ` · ${m.dropoff_location}` : ""}
-                        </p>
-                        <span className="text-[10px] font-bold shrink-0">
-                          {SITE_LABEL[m.origin]} → <span className="text-primary">{SITE_LABEL[m.destination]}</span>
-                        </span>
+                      <div key={m.id} className="border-b border-border/60 pb-1.5 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-mono truncate">
+                            #{String(m.movement_number).padStart(3, "0")} {m.plate_state}-{m.plate} ·{" "}
+                            {new Date(m.occurred_at).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" })}
+                            {m.dropoff_location ? ` · ${m.dropoff_location}` : ""}
+                          </p>
+                          <span className="text-[10px] font-bold shrink-0">
+                            {SITE_LABEL[m.origin]} → <span className="text-primary">{SITE_LABEL[m.destination]}</span>
+                          </span>
+                        </div>
+                        <MovementPhotos paths={m.photos ?? []} />
                       </div>
                     ))}
                     {d.movements.length === 0 && <p className="text-xs text-muted-foreground">Sin movimientos.</p>}
@@ -733,5 +737,50 @@ function PanelPage() {
         {userMsg && <p className="text-[10px] text-muted-foreground">{userMsg}</p>}
       </section>
     </>
+  );
+}
+
+/** Galería de fotos de un movimiento (se abren firmadas desde el almacenamiento privado). */
+function MovementPhotos({ paths }: { paths: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [urls, setUrls] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  if (paths.length === 0) return <p className="text-[10px] text-muted-foreground">Sin fotos.</p>;
+
+  async function abrir() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (urls) return;
+    setLoading(true);
+    const { data } = await supabase.storage.from("vehicle-photos").createSignedUrls(paths, 3600);
+    setUrls((data ?? []).map((d) => d.signedUrl).filter(Boolean) as string[]);
+    setLoading(false);
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => void abrir()}
+        className="text-[10px] font-bold uppercase tracking-widest text-primary"
+      >
+        {open ? "Ocultar fotos" : `Ver fotos (${paths.length})`}
+      </button>
+      {open && loading && <p className="text-[10px] text-muted-foreground">Cargando fotos…</p>}
+      {open && urls && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {urls.map((u) => (
+            <a key={u} href={u} target="_blank" rel="noreferrer" className="shrink-0">
+              <img src={u} alt="Foto del movimiento" className="h-20 w-20 object-cover rounded-lg border border-border" />
+            </a>
+          ))}
+          {urls.length === 0 && <p className="text-[10px] text-muted-foreground">No se pudieron abrir las fotos.</p>}
+        </div>
+      )}
+    </div>
   );
 }
