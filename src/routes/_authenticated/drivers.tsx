@@ -230,13 +230,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setError("Confirma con OK que el vehículo está en condiciones para salir.");
       return;
     }
-    if (mode === "retorno" && (!servicio || !fotoUbicacion || !fotoLlave)) {
-      setError("Elige el servicio y toma las dos fotos (ubicación del carro y llave).");
-      return;
-    }
     setBusy(true);
     setError(null);
-    const fotos = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
+    const fotos: string[] = [];
+
     const { data, error: err } = await supabase
       .from("movements")
       .insert({
