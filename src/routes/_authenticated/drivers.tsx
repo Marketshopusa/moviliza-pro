@@ -152,7 +152,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setFotos((prev) => [...prev, path]);
       if (movementId) {
         const nuevas = [...fotos, path];
-        void supabase.from("movements").update({ photos: nuevas, photo_path: nuevas[0] }).eq("id", movementId);
+        void supabase
+          .from("movements")
+          .update({ photos: nuevas, photo_path: nuevas[0] ?? null })
+          .eq("id", movementId);
       }
       return path;
     } catch {
