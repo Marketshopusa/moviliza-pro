@@ -6,6 +6,10 @@ export type CardRead = {
   plate_state: string | null;
   plate: string | null;
   vehicle_model: string | null;
+  /** Color de fondo detectado en la tarjeta: amarillo, verde, azul o negro. */
+  card_color: "amarillo" | "verde" | "azul" | "negro" | null;
+  /** Terminal deducido del color: A, B, C o X. */
+  terminal: "A" | "B" | "C" | "X" | null;
   raw: string;
 };
 
@@ -28,7 +32,7 @@ export const readVehicleCard = createServerFn({ method: "POST" })
           {
             role: "system",
             content:
-              "Eres un lector de tarjetas de vehículos y placas de EE.UU. Devuelve SOLO un JSON con las claves plate_state (código de 2 letras del estado, ej FL), plate (solo caracteres alfanuméricos en mayúscula) y vehicle_model (marca y modelo, ej 'FREIGHTLINER CASCADIA' o 'TOYOTA COROLLA'). Usa null si el dato no aparece.",
+              "Eres un lector de tarjetas de vehículos y placas de EE.UU. Devuelve SOLO un JSON con las claves plate_state (código de 2 letras del estado, ej FL), plate (solo caracteres alfanuméricos en mayúscula), vehicle_model (marca y modelo) y card_color. card_color es el color DOMINANTE del fondo o superficie sobre la que está apoyada la tarjeta/llave: usa exactamente 'amarillo', 'verde', 'azul' o 'negro'. Usa null si el dato no aparece.",
           },
           {
             role: "user",
@@ -58,10 +62,24 @@ export const readVehicleCard = createServerFn({ method: "POST" })
       parsed = {};
     }
     const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null);
+    const colorRaw = (str(parsed["card_color"]) ?? "").toLowerCase();
+    const color: CardRead["card_color"] = colorRaw.includes("amarill")
+      ? "amarillo"
+      : colorRaw.includes("verde")
+        ? "verde"
+        : colorRaw.includes("azul")
+          ? "azul"
+          : colorRaw.includes("negro")
+            ? "negro"
+            : null;
+    const terminal: CardRead["terminal"] =
+      color === "amarillo" ? "A" : color === "verde" ? "B" : color === "azul" ? "C" : color === "negro" ? "X" : null;
     return {
       plate_state: str(parsed["plate_state"]),
       plate: str(parsed["plate"])?.replace(/[^A-Z0-9]/g, "") ?? null,
       vehicle_model: str(parsed["vehicle_model"]),
+      card_color: color,
+      terminal,
       raw,
     };
   });
