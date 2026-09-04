@@ -350,7 +350,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
           mode === "retorno"
             ? `Llegada a Base X · área: ${servicio} (fotos parqueo y llave)`
             : `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
-        ...(mode === "retorno" ? { photos: fotosLlegada, photo_path: fotosLlegada[0] } : {}),
+        photos: todas,
+        photo_path: todas[0] ?? null,
         latitude: position.lat,
         longitude: position.lng,
       })
