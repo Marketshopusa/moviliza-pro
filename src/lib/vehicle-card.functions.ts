@@ -83,3 +83,66 @@ export const readVehicleCard = createServerFn({ method: "POST" })
       raw,
     };
   });
+
+export type SpotRead = {
+  /** Número de parqueo leído, por ejemplo D16. */
+  spot: string | null;
+  /** Terminal leído en la foto (A, B, C o X). */
+  terminal: "A" | "B" | "C" | "X" | null;
+  raw: string;
+};
+
+/**
+ * Lee una foto de parqueo o de la pantalla del teléfono y devuelve
+ * el número de parqueo y el terminal registrado.
+ */
+export const readParkingPhoto = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data) => z.object({ image: z.string().min(20) }).parse(data))
+  .handler(async ({ data }): Promise<SpotRead> => {
+    const key = process.env["LOVABLE_API_KEY"];
+    if (!key) throw new Error("Falta la configuración de IA");
+
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-3.6-flash",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Lees fotos de señalización de parqueo o de la pantalla de un teléfono con el registro de un vehículo. Devuelve SOLO un JSON con las claves spot (el número o código de parqueo, por ejemplo 'D16', sin espacios ni guiones, en mayúscula) y terminal (una sola letra A, B, C o X si aparece el terminal). Usa null si el dato no aparece.",
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Extrae el número de parqueo y el terminal de esta foto." },
+              { type: "image_url", image_url: { url: data.image } },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      if (res.status === 429) throw new Error("Demasiadas lecturas seguidas. Espera unos segundos.");
+      if (res.status === 402) throw new Error("Sin créditos de IA disponibles.");
+      throw new Error(`No se pudo leer la foto (${res.status}): ${body.slice(0, 160)}`);
+    }
+
+    const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const raw = json.choices?.[0]?.message?.content ?? "";
+    const match = raw.match(/\{[\s\S]*\}/);
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = match ? (JSON.parse(match[0]) as Record<string, unknown>) : {};
+    } catch {
+      parsed = {};
+    }
+    const spotRaw = typeof parsed["spot"] === "string" ? parsed["spot"].toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+    const termRaw = typeof parsed["terminal"] === "string" ? parsed["terminal"].toUpperCase().replace(/[^ABCX]/g, "") : "";
+    const terminal = (["A", "B", "C", "X"] as const).find((t) => t === termRaw) ?? null;
+    return { spot: spotRaw || null, terminal, raw };
+  });
