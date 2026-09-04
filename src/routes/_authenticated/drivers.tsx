@@ -92,6 +92,7 @@ type Servicio = (typeof SERVICIOS)[number];
 function RutaFlow({ mode }: { mode: Mode }) {
   const { user } = useAuth();
   const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
   const [plateState, setPlateState] = useState("FL");
   const [plate, setPlate] = useState("");
   const [model, setModel] = useState("");
