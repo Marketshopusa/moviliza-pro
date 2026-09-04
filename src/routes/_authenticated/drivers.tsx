@@ -251,7 +251,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
         notes:
           mode === "salida"
             ? "Vehículo revisado OK antes de iniciar ruta"
-            : `Retorno · servicio: ${servicio}`,
+            : "Retorno hacia Base X",
+
         photos: fotos,
         photo_path: fotos[0] ?? null,
       })
