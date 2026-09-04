@@ -350,12 +350,19 @@ function RutaFlow({ mode }: { mode: Mode }) {
           </button>
           {scanMsg && <p className="text-xs text-center text-muted-foreground">{scanMsg}</p>}
 
-          {terminal && (
+          {mode === "salida" && terminal && (
             <div className="flex items-center justify-center gap-2">
               <span className={cn("size-9 rounded-full flex items-center justify-center text-sm font-bold", PUNTOS[terminal].color, PUNTOS[terminal].text)}>
                 {terminal}
               </span>
               <span className="text-[11px] font-bold uppercase tracking-widest">{PUNTOS[terminal].label}</span>
+            </div>
+          )}
+
+          {mode === "retorno" && (
+            <div className="flex items-center justify-center gap-2">
+              <span className="size-9 rounded-full flex items-center justify-center text-sm font-bold bg-black text-white">X</span>
+              <span className="text-[11px] font-bold uppercase tracking-widest">Retorno a Base X</span>
             </div>
           )}
 
