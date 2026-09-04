@@ -121,7 +121,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
     <Link
       to={to}
       activeOptions={{ exact: true }}
-      className="py-3 px-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground"
+      className="flex-1 text-center py-2.5 px-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-tight text-muted-foreground whitespace-nowrap"
       activeProps={{ className: "text-primary border-t-2 border-primary" }}
     >
       {label}
