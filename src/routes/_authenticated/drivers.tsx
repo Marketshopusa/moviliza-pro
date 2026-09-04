@@ -277,26 +277,38 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setError(`No estás en la ubicación correcta (${Math.round(distancia ?? 0)} m de ${meta.label}).`);
       return;
     }
-    if (!spot || !verifSpot) {
-      setError("Toma las dos fotos: número de parqueo y verificación.");
-      return;
-    }
-    if (spot !== verifSpot) {
-      setError(`Error: el parqueo de la foto (${spot}) no coincide con el registrado en el teléfono (${verifSpot}). Corrige el registro.`);
-      return;
-    }
-    if (verifTerminal && verifTerminal !== terminalEsperado) {
-      setError(
-        `Error de terminal: el teléfono registra Terminal ${verifTerminal} y este movimiento va al Terminal ${terminalEsperado}. Corrige el registro.`,
-      );
-      return;
+    if (mode === "retorno") {
+      if (!servicio || !fotoUbicacion || !fotoLlave) {
+        setError("Elige el área en la base y toma las dos fotos (parqueo y llave).");
+        return;
+      }
+    } else {
+      if (!spot || !verifSpot) {
+        setError("Toma las dos fotos: número de parqueo y verificación.");
+        return;
+      }
+      if (spot !== verifSpot) {
+        setError(`Error: el parqueo de la foto (${spot}) no coincide con el registrado en el teléfono (${verifSpot}). Corrige el registro.`);
+        return;
+      }
+      if (verifTerminal && verifTerminal !== terminalEsperado) {
+        setError(
+          `Error de terminal: el teléfono registra Terminal ${verifTerminal} y este movimiento va al Terminal ${terminalEsperado}. Corrige el registro.`,
+        );
+        return;
+      }
     }
     setBusy(true);
+    const fotosLlegada = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
     const { error: err } = await supabase
       .from("movements")
       .update({
-        dropoff_location: spot,
-        notes: `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
+        dropoff_location: mode === "retorno" ? servicio : spot,
+        notes:
+          mode === "retorno"
+            ? `Llegada a Base X · área: ${servicio} (fotos parqueo y llave)`
+            : `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
+        ...(mode === "retorno" ? { photos: fotosLlegada, photo_path: fotosLlegada[0] } : {}),
         latitude: position.lat,
         longitude: position.lng,
       })
@@ -305,7 +317,12 @@ function RutaFlow({ mode }: { mode: Mode }) {
     if (err) setError(err.message);
     else {
       setError(null);
-      setMessage(`Llegada confirmada en ${meta.label}, parqueo ${spot}.`);
+      setMessage(
+        mode === "retorno"
+          ? `Llegada confirmada en Base X · ${servicio}.`
+          : `Llegada confirmada en ${meta.label}, parqueo ${spot}.`,
+      );
+
       setPlate("");
       setModel("");
       setTerminal(null);
