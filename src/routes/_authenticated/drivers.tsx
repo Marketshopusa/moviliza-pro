@@ -77,6 +77,10 @@ function DriversPage() {
   );
 }
 
+/** Opciones de servicio/parqueo en la base (retorno). */
+const SERVICIOS = ["Limpieza general", "Change oil", "Tire", "Glas", "Shop", "Special cleaner"] as const;
+type Servicio = (typeof SERVICIOS)[number];
+
 function RutaFlow({ mode }: { mode: Mode }) {
   const { user } = useAuth();
   const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
@@ -92,6 +96,13 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [movementId, setMovementId] = useState<string | null>(null);
 
+  // Retorno: servicio elegido y sus dos fotos (ubicación del carro y llave).
+  const [servicio, setServicio] = useState<Servicio | null>(null);
+  const [pendiente, setPendiente] = useState<Servicio | null>(null);
+  const [fotoUbicacion, setFotoUbicacion] = useState<string | null>(null);
+  const [fotoLlave, setFotoLlave] = useState<string | null>(null);
+  const [subiendo, setSubiendo] = useState<"ubicacion" | "llave" | null>(null);
+
   // Llegada: foto del número de parqueo y foto de verificación (pantalla del teléfono).
   const [spot, setSpot] = useState("");
   const [verifSpot, setVerifSpot] = useState("");
@@ -101,6 +112,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const cardRef = useRef<HTMLInputElement>(null);
   const spotRef = useRef<HTMLInputElement>(null);
   const verifRef = useRef<HTMLInputElement>(null);
+  const ubicacionRef = useRef<HTMLInputElement>(null);
+  const llaveRef = useRef<HTMLInputElement>(null);
   const readCard = useServerFn(readVehicleCard);
   const readSpot = useServerFn(readParkingPhoto);
 
