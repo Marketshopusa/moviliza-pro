@@ -6,6 +6,10 @@ export type CardRead = {
   plate_state: string | null;
   plate: string | null;
   vehicle_model: string | null;
+  /** Color de fondo detectado en la tarjeta: amarillo, verde, azul o negro. */
+  card_color: "amarillo" | "verde" | "azul" | "negro" | null;
+  /** Terminal deducido del color: A, B, C o X. */
+  terminal: "A" | "B" | "C" | "X" | null;
   raw: string;
 };
 
