@@ -184,17 +184,59 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }
 
+  // Retorno: al elegir un servicio se abre la cámara (1. ubicación del carro, 2. llave).
+  function elegirServicio(s: Servicio) {
+    setPendiente(s);
+    setError(null);
+    ubicacionRef.current?.click();
+  }
+
+  async function subirFotoServicio(file: File, kind: "ubicacion" | "llave") {
+    if (!user) return;
+    setSubiendo(kind);
+    setError(null);
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
+      if (upErr) throw new Error(upErr.message);
+      if (kind === "ubicacion") {
+        setFotoUbicacion(path);
+        setSubiendo(null);
+        llaveRef.current?.click();
+        return;
+      }
+      setFotoLlave(path);
+      setServicio(pendiente);
+      setPendiente(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al subir la foto");
+      setPendiente(null);
+    } finally {
+      setSubiendo(null);
+    }
+  }
+
   async function iniciarRuta() {
-    if (!user || !plate || !terminal) {
-      setError("Escanea la tarjeta: falta placa o terminal.");
+    if (!user || !plate) {
+      setError("Escanea la tarjeta: falta la placa.");
       return;
     }
-    if (!revisado) {
+    if (mode === "salida" && !terminal) {
+      setError("Escanea la tarjeta: falta el terminal.");
+      return;
+    }
+    if (mode === "salida" && !revisado) {
       setError("Confirma con OK que el vehículo está en condiciones para salir.");
+      return;
+    }
+    if (mode === "retorno" && (!servicio || !fotoUbicacion || !fotoLlave)) {
+      setError("Elige el servicio y toma las dos fotos (ubicación del carro y llave).");
       return;
     }
     setBusy(true);
     setError(null);
+    const fotos = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
     const { data, error: err } = await supabase
       .from("movements")
       .insert({
@@ -202,16 +244,19 @@ function RutaFlow({ mode }: { mode: Mode }) {
         plate_state: plateState,
         plate,
         vehicle_model: model || null,
-        origin: mode === "salida" ? "X" : terminal,
+        origin: mode === "salida" ? "X" : terminal ?? "X",
         destination: mode === "salida" ? terminal : "X",
         dropoff_location: null,
         latitude: position?.lat ?? null,
         longitude: position?.lng ?? null,
         occurred_at: new Date().toISOString(),
         status: "sincronizado",
-        notes: "Vehículo revisado OK antes de iniciar ruta",
-        photos: [],
-        photo_path: null,
+        notes:
+          mode === "salida"
+            ? "Vehículo revisado OK antes de iniciar ruta"
+            : `Retorno · servicio: ${servicio}`,
+        photos: fotos,
+        photo_path: fotos[0] ?? null,
       })
       .select("id")
       .single();
