@@ -436,11 +436,34 @@ function RutaFlow({ mode }: { mode: Mode }) {
           )}
 
           {mode === "retorno" && (
-            <div className="flex items-center justify-center gap-2">
-              <span className="size-9 rounded-full flex items-center justify-center text-sm font-bold bg-black text-white">X</span>
-              <span className="text-[11px] font-bold uppercase tracking-widest">Retorno a Base X</span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-center gap-2">
+                <span className="size-9 rounded-full flex items-center justify-center text-sm font-bold bg-black text-white">X</span>
+                <span className="text-[11px] font-bold uppercase tracking-widest">Retorno a Base X</span>
+              </div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground text-center">
+                ¿De qué terminal regresa?
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {(["A", "B", "C"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTerminal(t)}
+                    className={cn(
+                      "py-3 rounded-xl font-bold uppercase text-xs tracking-widest border",
+                      terminal === t
+                        ? cn(PUNTOS[t].color, PUNTOS[t].text, "border-transparent")
+                        : "bg-background text-muted-foreground border-border",
+                    )}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
+
 
           <div className="grid grid-cols-3 gap-2">
             <div>
