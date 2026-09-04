@@ -106,6 +106,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [pendiente, setPendiente] = useState<Servicio | null>(null);
   const [fotoUbicacion, setFotoUbicacion] = useState<string | null>(null);
   const [fotoLlave, setFotoLlave] = useState<string | null>(null);
+  // Todas las fotos tomadas durante la ruta (incluidas las usadas para escanear).
+  const [fotos, setFotos] = useState<string[]>([]);
   const [subiendo, setSubiendo] = useState<"ubicacion" | "llave" | null>(null);
 
   // Llegada: foto del número de parqueo y foto de verificación (pantalla del teléfono).
