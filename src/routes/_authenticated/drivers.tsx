@@ -36,8 +36,14 @@ const PUNTOS: Record<Code, Punto> = {
   C: { code: "C", label: "Terminal C", lat: 28.4130398, lng: -81.3093816, color: "bg-blue-500", text: "text-white", ring: "ring-blue-300", line: "#3b82f6" },
 };
 
-/** Radio permitido para confirmar llegada (metros). */
-const RADIO_M = 50;
+/**
+ * Radio permitido para confirmar llegada (metros).
+ * La base X es un lote grande y los terminales tienen varios niveles de parqueo,
+ * por eso cada punto tiene su propio radio.
+ */
+const RADIO_POR_PUNTO: Record<Code, number> = { X: 300, A: 150, B: 150, C: 150 };
+/** Tolerancia extra según la precisión que reporte el teléfono. */
+const TOLERANCIA_MAX_M = 120;
 
 function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
