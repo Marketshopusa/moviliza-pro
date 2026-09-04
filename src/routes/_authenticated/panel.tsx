@@ -102,6 +102,7 @@ function PanelPage() {
   const [shiftMsg, setShiftMsg] = useState<string | null>(null);
   const [newShift, setNewShift] = useState({ name: "", start: "18:00", end: "02:30" });
   const [newEmail, setNewEmail] = useState<Record<string, string>>({});
+  const [openShift, setOpenShift] = useState<string | null>(null);
 
   const loadShifts = useCallback(async () => {
     const [{ data: ws }, { data: sa }] = await Promise.all([
