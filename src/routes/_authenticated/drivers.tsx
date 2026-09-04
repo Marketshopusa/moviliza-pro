@@ -141,8 +141,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
     const ids: number[] = [];
-    const ok = (pos: GeolocationPosition) =>
+    const ok = (pos: GeolocationPosition) => {
       setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      setAccuracy(pos.coords.accuracy ?? null);
+    };
     ids.push(
       navigator.geolocation.watchPosition(
         ok,
