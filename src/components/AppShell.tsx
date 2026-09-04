@@ -77,10 +77,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
         {children ?? <Outlet />}
       </main>
       <nav className="fixed bottom-0 inset-x-0 z-20 bg-card border-t border-border">
-        <div className="mx-auto max-w-5xl flex justify-around">
+        <div className="mx-auto max-w-5xl flex justify-between px-1">
+          <NavItem to="/drivers" label="Drivers" />
+          <NavItem to="/cleaners" label="Cleaners" />
           <NavItem to="/app" label="DAW" />
-          <NavItem to="/drivers" label="DRIVERS" />
-          <NavItem to="/cleaners" label="CLEANERS" />
           <NavItem to="/movimientos" label="Historial" />
           <NavItem to="/perfil" label="Perfil" />
           {isSupervisor && <NavItem to="/panel" label="Panel" />}
