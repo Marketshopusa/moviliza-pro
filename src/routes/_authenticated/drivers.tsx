@@ -77,6 +77,10 @@ function DriversPage() {
   );
 }
 
+/** Opciones de servicio/parqueo en la base (retorno). */
+const SERVICIOS = ["Limpieza general", "Change oil", "Tire", "Glas", "Shop", "Special cleaner"] as const;
+type Servicio = (typeof SERVICIOS)[number];
+
 function RutaFlow({ mode }: { mode: Mode }) {
   const { user } = useAuth();
   const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
@@ -92,6 +96,13 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [movementId, setMovementId] = useState<string | null>(null);
 
+  // Retorno: servicio elegido y sus dos fotos (ubicación del carro y llave).
+  const [servicio, setServicio] = useState<Servicio | null>(null);
+  const [pendiente, setPendiente] = useState<Servicio | null>(null);
+  const [fotoUbicacion, setFotoUbicacion] = useState<string | null>(null);
+  const [fotoLlave, setFotoLlave] = useState<string | null>(null);
+  const [subiendo, setSubiendo] = useState<"ubicacion" | "llave" | null>(null);
+
   // Llegada: foto del número de parqueo y foto de verificación (pantalla del teléfono).
   const [spot, setSpot] = useState("");
   const [verifSpot, setVerifSpot] = useState("");
@@ -101,6 +112,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const cardRef = useRef<HTMLInputElement>(null);
   const spotRef = useRef<HTMLInputElement>(null);
   const verifRef = useRef<HTMLInputElement>(null);
+  const ubicacionRef = useRef<HTMLInputElement>(null);
+  const llaveRef = useRef<HTMLInputElement>(null);
   const readCard = useServerFn(readVehicleCard);
   const readSpot = useServerFn(readParkingPhoto);
 
@@ -171,17 +184,59 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }
 
+  // Retorno: al elegir un servicio se abre la cámara (1. ubicación del carro, 2. llave).
+  function elegirServicio(s: Servicio) {
+    setPendiente(s);
+    setError(null);
+    ubicacionRef.current?.click();
+  }
+
+  async function subirFotoServicio(file: File, kind: "ubicacion" | "llave") {
+    if (!user) return;
+    setSubiendo(kind);
+    setError(null);
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
+      if (upErr) throw new Error(upErr.message);
+      if (kind === "ubicacion") {
+        setFotoUbicacion(path);
+        setSubiendo(null);
+        llaveRef.current?.click();
+        return;
+      }
+      setFotoLlave(path);
+      setServicio(pendiente);
+      setPendiente(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al subir la foto");
+      setPendiente(null);
+    } finally {
+      setSubiendo(null);
+    }
+  }
+
   async function iniciarRuta() {
-    if (!user || !plate || !terminal) {
-      setError("Escanea la tarjeta: falta placa o terminal.");
+    if (!user || !plate) {
+      setError("Escanea la tarjeta: falta la placa.");
       return;
     }
-    if (!revisado) {
+    if (mode === "salida" && !terminal) {
+      setError("Escanea la tarjeta: falta el terminal.");
+      return;
+    }
+    if (mode === "salida" && !revisado) {
       setError("Confirma con OK que el vehículo está en condiciones para salir.");
+      return;
+    }
+    if (mode === "retorno" && (!servicio || !fotoUbicacion || !fotoLlave)) {
+      setError("Elige el servicio y toma las dos fotos (ubicación del carro y llave).");
       return;
     }
     setBusy(true);
     setError(null);
+    const fotos = mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [];
     const { data, error: err } = await supabase
       .from("movements")
       .insert({
@@ -189,16 +244,19 @@ function RutaFlow({ mode }: { mode: Mode }) {
         plate_state: plateState,
         plate,
         vehicle_model: model || null,
-        origin: mode === "salida" ? "X" : terminal,
-        destination: mode === "salida" ? terminal : "X",
+        origin: mode === "salida" ? "X" : terminal ?? "X",
+        destination: mode === "salida" ? terminal! : "X",
         dropoff_location: null,
         latitude: position?.lat ?? null,
         longitude: position?.lng ?? null,
         occurred_at: new Date().toISOString(),
         status: "sincronizado",
-        notes: "Vehículo revisado OK antes de iniciar ruta",
-        photos: [],
-        photo_path: null,
+        notes:
+          mode === "salida"
+            ? "Vehículo revisado OK antes de iniciar ruta"
+            : `Retorno · servicio: ${servicio}`,
+        photos: fotos,
+        photo_path: fotos[0] ?? null,
       })
       .select("id")
       .single();
@@ -258,6 +316,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setSpot("");
       setVerifSpot("");
       setVerifTerminal(null);
+      setServicio(null);
+      setPendiente(null);
+      setFotoUbicacion(null);
+      setFotoLlave(null);
     }
   }
 
@@ -292,12 +354,19 @@ function RutaFlow({ mode }: { mode: Mode }) {
           </button>
           {scanMsg && <p className="text-xs text-center text-muted-foreground">{scanMsg}</p>}
 
-          {terminal && (
+          {mode === "salida" && terminal && (
             <div className="flex items-center justify-center gap-2">
               <span className={cn("size-9 rounded-full flex items-center justify-center text-sm font-bold", PUNTOS[terminal].color, PUNTOS[terminal].text)}>
                 {terminal}
               </span>
               <span className="text-[11px] font-bold uppercase tracking-widest">{PUNTOS[terminal].label}</span>
+            </div>
+          )}
+
+          {mode === "retorno" && (
+            <div className="flex items-center justify-center gap-2">
+              <span className="size-9 rounded-full flex items-center justify-center text-sm font-bold bg-black text-white">X</span>
+              <span className="text-[11px] font-bold uppercase tracking-widest">Retorno a Base X</span>
             </div>
           )}
 
@@ -332,21 +401,96 @@ function RutaFlow({ mode }: { mode: Mode }) {
             />
           </div>
 
-          <button
-            type="button"
-            onClick={() => setRevisado((v) => !v)}
-            className={cn(
-              "w-full py-3 rounded-xl font-bold uppercase text-xs tracking-widest border",
-              revisado ? "bg-green-600 text-white border-green-600" : "bg-background text-muted-foreground border-border",
-            )}
-          >
-            {revisado ? "OK · Vehículo revisado" : "OK · Confirmar gasolina, limpieza y sin daños"}
-          </button>
+          {mode === "salida" && (
+            <button
+              type="button"
+              onClick={() => setRevisado((v) => !v)}
+              className={cn(
+                "w-full py-3 rounded-xl font-bold uppercase text-xs tracking-widest border",
+                revisado ? "bg-green-600 text-white border-green-600" : "bg-background text-muted-foreground border-border",
+              )}
+            >
+              {revisado ? "OK · Vehículo revisado" : "OK · Confirmar gasolina, limpieza y sin daños"}
+            </button>
+          )}
+
+          {mode === "retorno" && (
+            <div className="space-y-2">
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={ubicacionRef}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void subirFotoServicio(f, "ubicacion");
+                  e.currentTarget.value = "";
+                }}
+              />
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={llaveRef}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void subirFotoServicio(f, "llave");
+                  e.currentTarget.value = "";
+                }}
+              />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                Servicio en la base · al elegir se abre la cámara (foto del carro y de la llave)
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {SERVICIOS.map((s) => {
+                  const activo = servicio === s;
+                  const enProceso = pendiente === s;
+                  const principal = s === "Limpieza general";
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => elegirServicio(s)}
+                      disabled={subiendo !== null}
+                      className={cn(
+                        "py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest border disabled:opacity-60",
+                        principal && "col-span-2",
+                        activo
+                          ? "bg-green-600 text-white border-green-600"
+                          : enProceso
+                            ? "bg-accent text-accent-foreground border-accent"
+                            : "bg-background text-muted-foreground border-border",
+                      )}
+                    >
+                      {enProceso
+                        ? subiendo === "llave"
+                          ? "Foto de la llave…"
+                          : "Foto del carro…"
+                        : activo
+                          ? `${s} ✓`
+                          : s}
+                    </button>
+                  );
+                })}
+              </div>
+              {servicio && (
+                <p className="text-center text-[11px] font-bold uppercase tracking-widest text-green-700 bg-green-600/10 rounded-lg p-2">
+                  {servicio} · fotos listas (carro + llave)
+                </p>
+              )}
+            </div>
+          )}
 
           <button
             type="button"
             onClick={() => void iniciarRuta()}
-            disabled={busy || !plate || !terminal || !revisado}
+            disabled={
+              busy ||
+              !plate ||
+              (mode === "salida" ? !terminal || !revisado : !servicio)
+            }
             className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60"
           >
             {busy ? "Guardando…" : "Iniciar ruta"}
