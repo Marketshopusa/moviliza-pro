@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { freshnessLabel } from "@/lib/geo";
 import type { SiteCode } from "@/lib/offline";
 import { deleteUser, listUsers, setUserRole, type ManagedUser } from "@/lib/admin.functions";
+import { executeStorageCleanup, type CleanupResult } from "@/lib/storage-cleanup.functions";
 
 export const Route = createFileRoute("/_authenticated/panel")({
   head: () => ({
@@ -35,6 +36,7 @@ type Row = {
   dropoff_location: string | null;
   occurred_at: string;
   photos: string[] | null;
+  notes?: string | null;
 };
 
 type NoteRow = { id: string; driver_id: string; body: string; created_at: string };
@@ -85,6 +87,10 @@ function PanelPage() {
   const fetchUsers = useServerFn(listUsers);
   const removeUser = useServerFn(deleteUser);
   const changeRole = useServerFn(setUserRole);
+  const runCleanup = useServerFn(executeStorageCleanup);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null);
+  const [showCleanup, setShowCleanup] = useState(false);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [userMsg, setUserMsg] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
@@ -148,7 +154,7 @@ function PanelPage() {
         supabase
           .from("movements")
           .select(
-            "id, movement_number, driver_id, plate_state, plate, vehicle_model, origin, destination, dropoff_location, occurred_at, photos",
+            "id, movement_number, driver_id, plate_state, plate, vehicle_model, origin, destination, dropoff_location, occurred_at, photos, notes",
           )
           .gte("occurred_at", start)
           .lte("occurred_at", end)
@@ -554,6 +560,102 @@ function PanelPage() {
         </section>
       )}
 
+      {/* POLÍTICA DE RETENCIÓN DE FOTOS (30 DÍAS) */}
+      {(isAdmin || isSupervisor) && (
+        <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                Almacenamiento · Retención de 30 Días
+              </h2>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Purga de fotos antiguas en Supabase Storage preservando intactos los registros y métricas de viaje.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowCleanup(!showCleanup)}
+              className="text-[10px] font-bold uppercase px-3 py-1.5 rounded bg-secondary hover:bg-secondary/80 transition-colors"
+            >
+              {showCleanup ? "Ocultar" : "Gestionar"}
+            </button>
+          </div>
+
+          {showCleanup && (
+            <div className="pt-2 border-t border-border space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  disabled={cleanupBusy}
+                  onClick={async () => {
+                    setCleanupBusy(true);
+                    try {
+                      const res = await runCleanup({ data: { daysOld: 30, dryRun: true } });
+                      setCleanupResult(res);
+                    } catch (e) {
+                      setCleanupResult({
+                        success: false,
+                        dryRun: true,
+                        foundCount: 0,
+                        purgedCount: 0,
+                        cutoffDate: "",
+                        message: e instanceof Error ? e.message : "Error al simular purga",
+                      });
+                    } finally {
+                      setCleanupBusy(false);
+                    }
+                  }}
+                  className="bg-secondary text-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-2 rounded-lg hover:bg-secondary/80 disabled:opacity-50"
+                >
+                  {cleanupBusy ? "Analizando..." : "🔍 Simular Purga (> 30 días)"}
+                </button>
+
+                <button
+                  disabled={cleanupBusy}
+                  onClick={async () => {
+                    if (!window.confirm("¿Seguro que deseas eliminar definitivamente las fotografías de movimientos de más de 30 días para liberar espacio de almacenamiento?")) return;
+                    setCleanupBusy(true);
+                    try {
+                      const res = await runCleanup({ data: { daysOld: 30, dryRun: false } });
+                      setCleanupResult(res);
+                    } catch (e) {
+                      setCleanupResult({
+                        success: false,
+                        dryRun: false,
+                        foundCount: 0,
+                        purgedCount: 0,
+                        cutoffDate: "",
+                        message: e instanceof Error ? e.message : "Error al ejecutar purga",
+                      });
+                    } finally {
+                      setCleanupBusy(false);
+                    }
+                  }}
+                  className="bg-destructive text-destructive-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-2 rounded-lg hover:bg-destructive/90 disabled:opacity-50"
+                >
+                  {cleanupBusy ? "Purgando..." : "🗑️ Ejecutar Purga (> 30 días)"}
+                </button>
+              </div>
+
+              {cleanupResult && (
+                <div
+                  className={`p-3 rounded-lg text-xs border ${
+                    cleanupResult.success
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                      : "bg-destructive/10 border-destructive/30 text-destructive"
+                  }`}
+                >
+                  <p className="font-semibold">{cleanupResult.message}</p>
+                  {cleanupResult.foundCount > 0 && (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Fotos identificadas: {cleanupResult.foundCount} · Purgadas: {cleanupResult.purgedCount}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* TARJETA POR CONDUCTOR */}
 
       <section className="space-y-2">
@@ -680,6 +782,13 @@ function PanelPage() {
                             {SITE_LABEL[m.origin]} → <span className="text-primary">{SITE_LABEL[m.destination]}</span>
                           </span>
                         </div>
+                        {m.notes && m.notes.includes("[EXCEPCIÓN MANUAL") && (
+                          <div className="flex items-center gap-1.5 py-0.5">
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-500 border border-amber-500/30">
+                              ⚠️ Excepción Manual: {m.notes.replace("[EXCEPCIÓN MANUAL:", "").replace("]", "").trim()}
+                            </span>
+                          </div>
+                        )}
                         <MovementPhotos paths={m.photos ?? []} />
                       </div>
                     ))}

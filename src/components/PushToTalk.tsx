@@ -4,61 +4,10 @@ import { useAuth } from "@/lib/auth";
 import { useLiveVoice } from "@/lib/live-voice";
 
 type Channel = { id: string; name: string; is_admin_only: boolean };
-type VoiceMessage = { id: string; audio_path: string; sender_id: string; created_at: string };
 
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
 const SILENCE =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
-
-function writeAscii(view: DataView, offset: number, value: string) {
-  for (let index = 0; index < value.length; index += 1) {
-    view.setUint8(offset + index, value.charCodeAt(index));
-  }
-}
-
-async function convertToCompatibleWav(source: Blob) {
-  const AudioContextClass = window.AudioContext;
-  const context = new AudioContextClass();
-  try {
-    const decoded = await context.decodeAudioData(await source.arrayBuffer());
-    const targetRate = Math.min(16000, decoded.sampleRate);
-    const frameCount = Math.max(1, Math.floor(decoded.duration * targetRate));
-    const mono = new Float32Array(frameCount);
-    const ratio = decoded.sampleRate / targetRate;
-
-    for (let frame = 0; frame < frameCount; frame += 1) {
-      const sourceFrame = Math.min(decoded.length - 1, Math.floor(frame * ratio));
-      let sample = 0;
-      for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
-        sample += decoded.getChannelData(channel)[sourceFrame] ?? 0;
-      }
-      mono[frame] = sample / decoded.numberOfChannels;
-    }
-
-    const buffer = new ArrayBuffer(44 + mono.length * 2);
-    const view = new DataView(buffer);
-    writeAscii(view, 0, "RIFF");
-    view.setUint32(4, 36 + mono.length * 2, true);
-    writeAscii(view, 8, "WAVE");
-    writeAscii(view, 12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, targetRate, true);
-    view.setUint32(28, targetRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeAscii(view, 36, "data");
-    view.setUint32(40, mono.length * 2, true);
-    for (let index = 0; index < mono.length; index += 1) {
-      const sample = Math.max(-1, Math.min(1, mono[index] ?? 0));
-      view.setInt16(44 + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-    }
-    return new Blob([buffer], { type: "audio/wav" });
-  } finally {
-    void context.close();
-  }
-}
 
 
 export function PushToTalk() {
@@ -72,77 +21,18 @@ export function PushToTalk() {
   const [status, setStatus] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [pressed, setPressed] = useState(false);
-  const [speaking, setSpeaking] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newPass, setNewPass] = useState("");
   const [newAdmin, setNewAdmin] = useState(false);
   const [manageId, setManageId] = useState<string | null>(null);
   const [managePass, setManagePass] = useState("");
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const startedRef = useRef<number>(0);
-  const queueRef = useRef<{ url: string; who: string }[]>([]);
-  const playingRef = useRef(false);
-  const namesRef = useRef<Record<string, string>>({});
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
-  const unlockedRef = useRef(false);
-  const blockedAudioRef = useRef<{ url: string; who: string } | null>(null);
-  const receivedIdsRef = useRef<Set<string>>(new Set());
-  const messageCursorRef = useRef<string>(new Date().toISOString());
-  const liveTalkRef = useRef(false);
-
-  // Un único elemento de audio reutilizado: los navegadores móviles solo permiten
-  // reproducir en un elemento que ya fue "desbloqueado" por un gesto del usuario.
-  const getAudioEl = useCallback(() => {
-    if (!audioElRef.current && typeof window !== "undefined") {
-      const el = new Audio();
-      el.preload = "auto";
-      el.setAttribute("playsinline", "true");
-      audioElRef.current = el;
-    }
-    return audioElRef.current;
-  }, []);
-
-  const unlockAudio = useCallback(async () => {
-    const el = getAudioEl();
-    if (!el) return;
-    try {
-      if (blockedAudioRef.current) {
-        playingRef.current = true;
-        await el.play();
-        blockedAudioRef.current = null;
-        unlockedRef.current = true;
-        setStatus(null);
-        return;
-      }
-      if (unlockedRef.current) return;
-      el.muted = true;
-      el.src = SILENCE;
-      await el.play();
-      el.pause();
-      el.currentTime = 0;
-      el.muted = false;
-      unlockedRef.current = true;
-    } catch {
-      // El siguiente gesto del usuario vuelve a intentarlo automáticamente.
-    }
-  }, [getAudioEl]);
-
-  // Cualquier toque en la pantalla habilita la reproducción de audio entrante.
-  useEffect(() => {
-    const handler = () => void unlockAudio();
-    window.addEventListener("pointerdown", handler, { once: false });
-    return () => {
-      window.removeEventListener("pointerdown", handler);
-    };
-  }, [unlockAudio]);
-
+  const isHoldingRef = useRef(false);
 
   const channel = channels.find((c) => c.id === channelId) ?? null;
   const isMember = channelId ? memberIds.includes(channelId) : false;
 
-  // Voz en vivo (WebRTC). Los clips solo se usan si no hay nadie conectado.
+  // Voz centralizada en tiempo real Half-Duplex (100% en memoria / WebSockets, 0 BD)
   const live = useLiveVoice({
     channelId: isMember ? channelId : null,
     enabled: isMember,
@@ -188,106 +78,7 @@ export function PushToTalk() {
     if (channelId && typeof window !== "undefined") window.localStorage.setItem(LAST_CHANNEL_KEY, channelId);
   }, [channelId]);
 
-  const playNext = useCallback(() => {
-    const next = queueRef.current.shift();
-    if (!next) {
-      playingRef.current = false;
-      setSpeaking(null);
-      return;
-    }
-    playingRef.current = true;
-    setSpeaking(next.who);
-    if (typeof navigator !== "undefined" && "mediaSession" in navigator) {
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: `Habla ${next.who}`,
-          artist: "MOVILIZA-PRO · Walkie-talkie",
-        });
-        navigator.mediaSession.playbackState = "playing";
-      } catch {
-        /* sin soporte */
-      }
-    }
 
-    const audio = getAudioEl();
-    if (!audio) return;
-    audio.onended = () => playNext();
-    audio.onerror = () => playNext();
-    audio.muted = false;
-    audio.src = next.url;
-    void audio.play().catch(() => {
-      blockedAudioRef.current = next;
-      // Conserva el turno actual para no reemplazar ni perder este audio si
-      // llegan más transmisiones antes del siguiente gesto del usuario.
-      playingRef.current = true;
-      setStatus("Audio pendiente · toca la pantalla para escucharlo");
-    });
-  }, [getAudioEl]);
-
-  const enqueue = useCallback(
-    async (path: string, senderId: string) => {
-      const { data } = await supabase.storage.from("voice-clips").createSignedUrl(path, 3600);
-      if (!data?.signedUrl) return;
-      let who = namesRef.current[senderId];
-      if (!who) {
-        const { data: p } = await supabase.rpc("public_profiles", { _ids: [senderId] });
-        const row = (p as { full_name: string; initials: string }[] | null)?.[0];
-        who = (row?.initials || row?.full_name || "Conductor") as string;
-        namesRef.current[senderId] = who;
-      }
-      queueRef.current.push({ url: data.signedUrl, who });
-      if (!playingRef.current) playNext();
-    },
-    [playNext],
-  );
-
-  const receiveMessage = useCallback(
-    (row: VoiceMessage) => {
-      if (!user || row.sender_id === user.id || receivedIdsRef.current.has(row.id)) return;
-      receivedIdsRef.current.add(row.id);
-      if (row.created_at > messageCursorRef.current) messageCursorRef.current = row.created_at;
-      void enqueue(row.audio_path, row.sender_id);
-    },
-    [enqueue, user],
-  );
-
-  useEffect(() => {
-    if (!channelId || !isMember || !user) return;
-    receivedIdsRef.current.clear();
-    // Incluye unos segundos previos para cubrir el instante en que el teléfono
-    // cambia de red, vuelve del fondo o termina de conectar Realtime.
-    messageCursorRef.current = new Date(Date.now() - 5000).toISOString();
-
-    const syncMessages = async () => {
-      const { data, error } = await supabase
-        .from("voice_messages")
-        .select("id, audio_path, sender_id, created_at")
-        .eq("channel_id", channelId)
-        .gt("created_at", messageCursorRef.current)
-        .order("created_at", { ascending: true })
-        .limit(25);
-      if (error) return;
-      for (const row of (data ?? []) as VoiceMessage[]) receiveMessage(row);
-    };
-
-    const sub = supabase
-      .channel(`voice-${channelId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "voice_messages", filter: `channel_id=eq.${channelId}` },
-        (payload) => {
-          receiveMessage(payload.new as VoiceMessage);
-        },
-      )
-      .subscribe((subscriptionStatus) => {
-        if (subscriptionStatus === "SUBSCRIBED") void syncMessages();
-      });
-    const poll = window.setInterval(() => void syncMessages(), 1500);
-    return () => {
-      window.clearInterval(poll);
-      void supabase.removeChannel(sub);
-    };
-  }, [channelId, isMember, user, receiveMessage]);
 
   async function join(e: React.FormEvent) {
     e.preventDefault();
@@ -366,78 +157,37 @@ export function PushToTalk() {
 
   async function startTalk() {
     if (!user || !channelId || !isMember || recording) return;
+    isHoldingRef.current = true;
     live.resumeAudio();
-    if (live.peerCount > 0) {
-      const ok = await live.startTransmit();
-      if (ok) {
-        liveTalkRef.current = true;
-        setRecording(true);
-        setStatus(null);
-        return;
-      }
+    const ok = await live.startTransmit();
+    // Si el usuario ya soltó el botón antes de que el micrófono estuviera listo
+    if (!isHoldingRef.current) {
+      void live.stopTransmit();
+      setRecording(false);
+      return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      chunksRef.current = [];
-      startedRef.current = Date.now();
-      rec.ondataavailable = (ev) => {
-        if (ev.data.size > 0) chunksRef.current.push(ev.data);
-      };
-      rec.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const duration = Date.now() - startedRef.current;
-        const recordedBlob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
-        if (duration < 400 || recordedBlob.size === 0) {
-          setStatus("Transmisión muy corta");
-          return;
-        }
-        setStatus("Preparando audio…");
-        let uploadBlob: Blob;
-        try {
-          uploadBlob = await convertToCompatibleWav(recordedBlob);
-        } catch {
-          setStatus("Este teléfono no pudo preparar el audio. Intenta nuevamente.");
-          return;
-        }
-        const path = `${user.id}/${crypto.randomUUID()}.wav`;
-        const { error: upErr } = await supabase.storage.from("voice-clips").upload(path, uploadBlob, {
-          contentType: "audio/wav",
-          upsert: false,
-        });
-        if (upErr) {
-          setStatus("No se pudo enviar el audio");
-          return;
-        }
-        const { error } = await supabase.from("voice_messages").insert({
-          channel_id: channelId,
-          sender_id: user.id,
-          audio_path: path,
-          duration_ms: duration,
-        });
-        setStatus(error ? "No se pudo enviar el audio" : `Enviado · ${(duration / 1000).toFixed(1)}s`);
-      };
-      recorderRef.current = rec;
-      rec.start();
+    if (ok) {
       setRecording(true);
       setStatus(null);
-    } catch {
-      setStatus("Permite el acceso al micrófono para hablar");
+    } else {
+      setRecording(false);
     }
   }
 
-  function stopTalk() {
-    if (liveTalkRef.current) {
-      liveTalkRef.current = false;
-      live.stopTransmit();
-      setRecording(false);
-      setStatus(null);
+  async function stopTalk() {
+    isHoldingRef.current = false;
+    if (!recording) {
+      void live.stopTransmit();
       return;
     }
-    if (!recording) return;
     setRecording(false);
-    recorderRef.current?.stop();
-    recorderRef.current = null;
+    setStatus("Transmitido");
+    try {
+      await live.stopTransmit();
+      setTimeout(() => setStatus(null), 1200);
+    } catch {
+      setStatus(null);
+    }
   }
 
   const visibleChannels = channels.filter((c) => !c.is_admin_only || isSupervisor);
@@ -451,21 +201,23 @@ export function PushToTalk() {
           disabled={!isMember}
           onPointerDown={(e) => {
             e.preventDefault();
-            void unlockAudio();
+            live.resumeAudio();
             setPressed(true);
             void startTalk();
           }}
           onPointerUp={() => {
             setPressed(false);
-            stopTalk();
+            void stopTalk();
           }}
           onPointerLeave={() => {
-            setPressed(false);
-            stopTalk();
+            if (pressed) {
+              setPressed(false);
+              void stopTalk();
+            }
           }}
           onPointerCancel={() => {
             setPressed(false);
-            stopTalk();
+            void stopTalk();
           }}
           onContextMenu={(e) => e.preventDefault()}
           className={`size-20 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
@@ -493,13 +245,11 @@ export function PushToTalk() {
             ? "Transmitiendo…"
             : live.speaker
               ? `Habla ${live.speaker}`
-              : speaking
-                ? `Habla ${speaking}`
-                : !isMember
-                  ? "Ingresa la clave del canal"
-                  : live.peerCount > 0
-                    ? `En vivo · ${live.peerCount} en línea`
-                    : "Mantén presionado para hablar"}
+              : !isMember
+                ? "Ingresa la clave del canal"
+                : live.peerCount > 0
+                  ? `En vivo · ${live.peerCount} en línea`
+                  : "Mantén presionado para hablar"}
         </p>
       </div>
 

@@ -4,11 +4,13 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard, readParkingPhoto } from "@/lib/vehicle-card.functions";
+import { detectCardColor } from "@/lib/card-color-detector";
 import { getVehiclePosition, type VehiclePosition } from "@/lib/vehicle-positions.functions";
 import { cn } from "@/lib/utils";
 import { ShiftPanel } from "@/components/ShiftPanel";
 import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
 import { VehicleSpotMap } from "@/components/VehicleSpotMap";
+import { compressImage } from "@/lib/image-compression";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -105,6 +107,11 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [movementId, setMovementId] = useState<string | null>(null);
 
+  // Selector manual de emergencia (exclusivo para fallas de cámara o tarjeta ilegible)
+  const [showManualOverride, setShowManualOverride] = useState(false);
+  const [manualOverride, setManualOverride] = useState(false);
+  const [manualReason, setManualReason] = useState("");
+
   // Última ubicación guardada del vehículo en Base X (registrada por cleaners).
   const [vehPos, setVehPos] = useState<VehiclePosition | null>(null);
 
@@ -163,11 +170,12 @@ function RutaFlow({ mode }: { mode: Mode }) {
     return () => ids.forEach((id) => navigator.geolocation.clearWatch(id));
   }, []);
 
-  /** Guarda en el sistema cualquier foto tomada (también las usadas para escanear). */
-  async function archivarFoto(file: File, kind: string): Promise<string | null> {
+  /** Guarda en el sistema cualquier foto tomada (también las usadas para escanear), comprimida a máx 1280px / ~120KB. */
+  async function archivarFoto(rawFile: File, kind: string): Promise<string | null> {
     if (!user) return null;
     try {
-      const ext = file.name.split(".").pop() || "jpg";
+      const file = await compressImage(rawFile);
+      const ext = file.name.split(".").pop() || "webp";
       const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
       const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
       if (upErr) return null;
@@ -185,14 +193,18 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }
 
-  async function handleCard(file: File) {
+  async function handleCard(rawFile: File) {
     setScanning(true);
     setScanMsg(null);
     setError(null);
     try {
+      const file = await compressImage(rawFile);
       void archivarFoto(file, "tarjeta");
-      const dataUrl = await fileToDataUrl(file);
-      const res = await readCard({ data: { image: dataUrl } });
+      const [dataUrl, clientColor] = await Promise.all([
+        fileToDataUrl(file),
+        detectCardColor(file),
+      ]);
+      const res = await readCard({ data: { image: dataUrl, clientColor } });
       if (res.plate) setPlate(res.plate);
       if (res.plate_state) setPlateState(res.plate_state);
       if (res.vehicle_model) setModel(res.vehicle_model);
@@ -225,10 +237,11 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }
 
-  async function handleSpotPhoto(file: File, kind: "spot" | "verif") {
+  async function handleSpotPhoto(rawFile: File, kind: "spot" | "verif") {
     setLeyendo(kind);
     setError(null);
     try {
+      const file = await compressImage(rawFile);
       void archivarFoto(file, kind === "spot" ? "parqueo" : "verificacion");
       const dataUrl = await fileToDataUrl(file);
       const res = await readSpot({ data: { image: dataUrl } });
@@ -254,12 +267,13 @@ function RutaFlow({ mode }: { mode: Mode }) {
     ubicacionRef.current?.click();
   }
 
-  async function subirFotoServicio(file: File, kind: "ubicacion" | "llave") {
+  async function subirFotoServicio(rawFile: File, kind: "ubicacion" | "llave") {
     if (!user) return;
     setSubiendo(kind);
     setError(null);
     try {
-      const ext = file.name.split(".").pop() || "jpg";
+      const file = await compressImage(rawFile);
+      const ext = file.name.split(".").pop() || "webp";
       const path = `${user.id}/${Date.now()}-${kind}.${ext}`;
       const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
       if (upErr) throw new Error(upErr.message);
@@ -287,7 +301,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       return;
     }
     if (mode === "salida" && !terminal) {
-      setError("Escanea la tarjeta: falta el terminal.");
+      setError("Falta el terminal de destino. Escanea la tarjeta o usa el selector de emergencia.");
       return;
     }
     if (mode === "retorno" && !terminal) {
@@ -298,9 +312,19 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setError("Confirma con OK que el vehículo está en condiciones para salir.");
       return;
     }
+    if (manualOverride && !manualReason.trim()) {
+      setError("Debes indicar el motivo de la excepción manual de emergencia.");
+      return;
+    }
+
     setBusy(true);
     setError(null);
-    
+
+    const auditTag = manualOverride ? ` · [EXCEPCIÓN MANUAL: ${manualReason}]` : "";
+    const notesText =
+      mode === "salida"
+        ? `Vehículo revisado OK antes de iniciar ruta${auditTag}`
+        : `Retorno hacia Base X${auditTag}`;
 
     const { data, error: err } = await supabase
       .from("movements")
@@ -316,11 +340,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
         longitude: position?.lng ?? null,
         occurred_at: new Date().toISOString(),
         status: "sincronizado",
-        notes:
-          mode === "salida"
-            ? "Vehículo revisado OK antes de iniciar ruta"
-            : "Retorno hacia Base X",
-
+        notes: notesText,
         photos: fotos,
         photo_path: fotos[0] ?? null,
       })
@@ -330,7 +350,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
     if (err) setError(err.message);
     else {
       setMovementId(data.id);
-      setMessage(mode === "salida" ? "Ruta iniciada hacia el terminal." : "Ruta iniciada hacia la base.");
+      setMessage(mode === "salida" ? `Ruta iniciada hacia ${PUNTOS[terminal!].label}.` : "Ruta iniciada hacia Base X.");
     }
   }
 
@@ -339,52 +359,86 @@ function RutaFlow({ mode }: { mode: Mode }) {
     ? RADIO_POR_PUNTO[meta.code] + Math.min(accuracy ?? 0, TOLERANCIA_MAX_M)
     : 0;
   const enSitio = distancia !== null && distancia <= radioPermitido;
+
+  // Detección estricta de terminal incorrecto:
+  // Si el conductor se encuentra en las inmediaciones de otro terminal
+  const otroPuntoCercano = position
+    ? (Object.values(PUNTOS) as Punto[]).find((p) => {
+        if (!meta || p.code === meta.code) return false;
+        return distanciaM(position, p) <= RADIO_POR_PUNTO[p.code] + 60;
+      }) ?? null
+    : null;
+
   const coincide =
-    !!spot && !!verifSpot && spot === verifSpot && (!verifTerminal || verifTerminal === terminalEsperado);
+    !!spot &&
+    !!verifSpot &&
+    spot.trim().toUpperCase() === verifSpot.trim().toUpperCase() &&
+    (!verifTerminal || verifTerminal === terminalEsperado);
 
   async function confirmarLlegada() {
     if (!meta || !movementId) return;
-    if (!position || !enSitio) {
-      setError(`No estás en la ubicación correcta (${Math.round(distancia ?? 0)} m de ${meta.label}).`);
+
+    // 1. RECHAZO TAJANTE: Terminal incorrecto
+    if (otroPuntoCercano) {
+      setError(
+        `TERMINAL INCORRECTO: El GPS detecta que estás en ${otroPuntoCercano.label}. Tu destino obligatorio asignado es ${meta.label}. La aplicación no te dejará cerrar la ruta aquí. Traslada el vehículo al ${meta.label}.`,
+      );
       return;
     }
+
+    // 2. RECHAZO: Fuera de la geocerca permitida
+    if (!position || !enSitio) {
+      setError(
+        `GPS NO RECONOCE LA LLEGADA: Te encuentras a ${Math.round(distancia ?? 0)} m de ${meta.label} (radio permitido: ${Math.round(radioPermitido)} m). Acércate al área asignada para poder confirmar la llegada.`,
+      );
+      return;
+    }
+
+    // 3. Validación obligatoria de fotos y correspondencia
     if (mode === "retorno") {
       if (!servicio || !fotoUbicacion || !fotoLlave) {
-        setError("Elige el área en la base y toma las dos fotos (parqueo y llave).");
+        setError("Elige el área en la base y toma las dos fotos requeridas (parqueo y llave).");
         return;
       }
     } else {
       if (!spot || !verifSpot) {
-        setError("Toma las dos fotos: número de parqueo y verificación.");
+        setError("Toma las dos fotos obligatorias: número de parqueo y pantalla de verificación.");
         return;
       }
-      if (spot !== verifSpot) {
-        setError(`Error: el parqueo de la foto (${spot}) no coincide con el registrado en el teléfono (${verifSpot}). Corrige el registro.`);
+      if (spot.trim().toUpperCase() !== verifSpot.trim().toUpperCase()) {
+        setError(
+          `Error de parqueo: El parqueo fotografiado (${spot}) no coincide con el registrado (${verifSpot}). Corrige el registro.`,
+        );
         return;
       }
       if (verifTerminal && verifTerminal !== terminalEsperado) {
         setError(
-          `Error de terminal: el teléfono registra Terminal ${verifTerminal} y este movimiento va al Terminal ${terminalEsperado}. Corrige el registro.`,
+          `Error de terminal: La foto de verificación indica Terminal ${verifTerminal}, pero tu destino obligatorio es Terminal ${terminalEsperado}. Corrige la entrega.`,
         );
         return;
       }
     }
+
     setBusy(true);
     const todas = [...new Set([...fotos, ...(mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [])])];
+    const gpsAudit = ` · GPS: ±${Math.round(accuracy ?? 0)}m (distancia al punto: ${Math.round(distancia ?? 0)}m)`;
+    const cleanSpot = spot.trim().toUpperCase();
+
     const { error: err } = await supabase
       .from("movements")
       .update({
-        dropoff_location: mode === "retorno" ? servicio : spot,
+        dropoff_location: mode === "retorno" ? servicio : cleanSpot,
         notes:
           mode === "retorno"
-            ? `Llegada a Base X · área: ${servicio} (fotos parqueo y llave)`
-            : `Llegada confirmada por GPS en ${meta.label} · parqueo ${spot} verificado`,
+            ? `Llegada a Base X · área: ${servicio} (fotos parqueo y llave)${gpsAudit}`
+            : `Llegada confirmada por GPS en ${meta.label} · parqueo ${cleanSpot} verificado${gpsAudit}`,
         photos: todas,
         photo_path: todas[0] ?? null,
         latitude: position.lat,
         longitude: position.lng,
       })
       .eq("id", movementId);
+
     setBusy(false);
     if (err) setError(err.message);
     else {
@@ -392,7 +446,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setMessage(
         mode === "retorno"
           ? `Llegada confirmada en Base X · ${servicio}.`
-          : `Llegada confirmada en ${meta.label}, parqueo ${spot}.`,
+          : `Llegada confirmada en ${meta.label}, parqueo ${cleanSpot}.`,
       );
 
       setPlate("");
@@ -408,6 +462,9 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setPendiente(null);
       setFotoUbicacion(null);
       setFotoLlave(null);
+      setShowManualOverride(false);
+      setManualOverride(false);
+      setManualReason("");
     }
   }
 
@@ -443,11 +500,107 @@ function RutaFlow({ mode }: { mode: Mode }) {
           {scanMsg && <p className="text-xs text-center text-muted-foreground">{scanMsg}</p>}
 
           {mode === "salida" && terminal && (
-            <div className="flex items-center justify-center gap-2">
-              <span className={cn("size-9 rounded-full flex items-center justify-center text-sm font-bold", PUNTOS[terminal].color, PUNTOS[terminal].text)}>
+            <div className="flex items-center justify-center gap-3 p-3 bg-secondary/50 rounded-xl border border-border">
+              <span className={cn("size-10 rounded-full flex items-center justify-center text-base font-bold shadow", PUNTOS[terminal].color, PUNTOS[terminal].text)}>
                 {terminal}
               </span>
-              <span className="text-[11px] font-bold uppercase tracking-widest">{PUNTOS[terminal].label}</span>
+              <div className="text-left">
+                <span className="text-xs font-bold uppercase tracking-wider block">{PUNTOS[terminal].label}</span>
+                <span className="text-[10px] text-muted-foreground uppercase font-medium">
+                  {manualOverride ? "Asignado manualmente (Emergencia)" : "Detectado por color de tarjeta"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Selector manual de emergencia (exclusivo para fallas extremas) */}
+          {mode === "salida" && (
+            <div className="pt-1">
+              {!showManualOverride ? (
+                <button
+                  type="button"
+                  onClick={() => setShowManualOverride(true)}
+                  className="w-full text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-amber-500 py-1.5 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span>⚠️</span> ¿Falla de escaneo o tarjeta ilegible? Selector de emergencia
+                </button>
+              ) : (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <span>⚠️</span> Selector Manual de Emergencia
+                      </p>
+                      <p className="text-[10px] text-muted-foreground leading-snug">
+                        Solo para casos extremos de tarjeta rota o cámara averiada. Esta excepción quedará registrada con tu usuario para auditoría administrativa.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowManualOverride(false);
+                        setManualOverride(false);
+                        setManualReason("");
+                      }}
+                      className="text-xs font-bold text-muted-foreground hover:text-foreground px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Terminal de destino asignado:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["A", "B", "C"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            setTerminal(t);
+                            setManualOverride(true);
+                          }}
+                          className={cn(
+                            "py-2.5 rounded-lg font-bold uppercase text-xs tracking-widest border transition-all",
+                            terminal === t
+                              ? cn(PUNTOS[t].color, PUNTOS[t].text, "border-transparent ring-2 ring-amber-500 shadow")
+                              : "bg-background text-muted-foreground border-border hover:border-amber-400",
+                          )}
+                        >
+                          {t} · {PUNTOS[t].label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                      Motivo obligatorio de la excepción:
+                    </label>
+                    <select
+                      value={manualReason}
+                      onChange={(e) => {
+                        setManualReason(e.target.value);
+                        setManualOverride(true);
+                      }}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs font-medium"
+                    >
+                      <option value="">-- Selecciona el motivo --</option>
+                      <option value="Tarjeta física rota, manchada o ilegible">Tarjeta física rota, manchada o ilegible</option>
+                      <option value="Falla física de lente o cámara del dispositivo">Falla física de lente o cámara del dispositivo</option>
+                      <option value="Llavero sin etiqueta de color distinguible">Llavero sin etiqueta de color distinguible</option>
+                      <option value="Incidencia operativa autorizada por supervisor">Incidencia operativa autorizada por supervisor</option>
+                    </select>
+                  </div>
+
+                  {manualOverride && terminal && (
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-500/20 p-2 rounded-lg text-center">
+                      Excepción manual activa: Terminal {terminal} · {manualReason || "Falta motivo"}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -571,12 +724,71 @@ function RutaFlow({ mode }: { mode: Mode }) {
           <RutaMapaLeaflet puntos={Object.values(PUNTOS)} origen={origen} destino={destino} yo={position} />
 
           <div className="bg-card border border-border rounded-xl p-4 space-y-4">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-              Ruta de driver · {mode === "salida" ? `Base X → ${destino?.label ?? ""}` : `${origen?.label ?? ""} → Base X`}
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {plateState} {plate} {model ? `· ${model}` : ""}
-            </p>
+            {/* Cabecera con indicación de destino por color */}
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-border">
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground block">
+                  {mode === "salida" ? "Ruta de salida hacia terminal" : "Ruta de retorno a Base X"}
+                </span>
+                <p className="text-sm font-bold truncate">
+                  {plateState} {plate} {model ? `· ${model}` : ""}
+                </p>
+              </div>
+              {meta && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={cn("size-8 rounded-full flex items-center justify-center text-xs font-bold shadow", PUNTOS[meta.code].color, PUNTOS[meta.code].text)}>
+                    {meta.code}
+                  </span>
+                  <span className="text-xs font-bold uppercase tracking-wider">{meta.label}</span>
+                </div>
+              )}
+            </div>
+
+            {/* ALERTA DE TERMINAL INCORRECTO DETECTADO POR GPS */}
+            {otroPuntoCercano && (
+              <div className="bg-red-600 text-white rounded-xl p-3.5 space-y-1.5 shadow-lg border-2 border-white animate-pulse">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🛑</span>
+                  <p className="text-xs font-black uppercase tracking-wider">¡TERMINAL INCORRECTO DETECTADO!</p>
+                </div>
+                <p className="text-xs leading-snug font-medium">
+                  El GPS detecta que estás en <strong>{otroPuntoCercano.label}</strong>, pero este vehículo debe entregarse obligatoriamente en <strong>{meta?.label}</strong>.
+                </p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-yellow-200">
+                  Trasládate al {meta?.label} ({Math.round(distancia ?? 0)} m restantes). La aplicación no te permitirá cerrar la ruta en una ubicación equivocada.
+                </p>
+              </div>
+            )}
+
+            {/* Estado GPS y Distancia en tiempo real */}
+            {meta && distancia !== null && (
+              <div
+                className={cn(
+                  "rounded-xl p-3 border text-center space-y-1",
+                  otroPuntoCercano
+                    ? "bg-red-500/10 border-red-500/30 text-red-600"
+                    : enSitio
+                      ? "bg-green-500/10 border-green-500/30 text-green-700"
+                      : "bg-secondary/60 border-border text-muted-foreground",
+                )}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-sm">{enSitio && !otroPuntoCercano ? "🟢" : otroPuntoCercano ? "🛑" : "📍"}</span>
+                  <p className="text-xs font-bold uppercase tracking-wider">
+                    {otroPuntoCercano
+                      ? `En terminal equivocado: ${otroPuntoCercano.label}`
+                      : enSitio
+                        ? `GPS verificado en ${meta.label} ✓`
+                        : `A ${Math.round(distancia)} m de ${meta.label}`}
+                  </p>
+                </div>
+                <p className="text-[10px] font-mono leading-tight">
+                  {enSitio && !otroPuntoCercano
+                    ? `Dentro de la geocerca permitida (±${Math.round(accuracy ?? 0)} m) · Cierre autorizado`
+                    : `Geocerca requerida: dentro de ${Math.round(radioPermitido)} m · Llegada bloqueada`}
+                </p>
+              </div>
+            )}
 
             <input
               type="file"
@@ -632,7 +844,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                   {enSitio
                     ? "Elige el área donde dejas el carro · se abre la cámara (parqueo y llave)"
-                    : "Al llegar a la Base X podrás elegir el área"}
+                    : "Al llegar a la Base X podrás elegir el área y tomar las fotos"}
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   {SERVICIOS.map((s) => {
@@ -673,65 +885,120 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 )}
               </div>
             ) : (
-              <>
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Fotos obligatorias de entrega en terminal:
+                </p>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => spotRef.current?.click()}
-                    disabled={leyendo !== null}
-                    className="py-3 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-[11px] tracking-widest disabled:opacity-60"
-                  >
-                    {leyendo === "spot" ? "Leyendo…" : spot ? `Parqueo ${spot}` : "Foto del parqueo"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => verifRef.current?.click()}
-                    disabled={leyendo !== null}
-                    className="py-3 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-[11px] tracking-widest disabled:opacity-60"
-                  >
-                    {leyendo === "verif" ? "Leyendo…" : verifSpot || verifTerminal ? `Verif. ${verifSpot}${verifTerminal ? ` · ${verifTerminal}` : ""}` : "Foto verificación"}
-                  </button>
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => spotRef.current?.click()}
+                      disabled={leyendo !== null}
+                      className={cn(
+                        "w-full py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest disabled:opacity-60 border",
+                        spot
+                          ? "bg-secondary text-foreground border-border"
+                          : "bg-accent text-accent-foreground border-transparent",
+                      )}
+                    >
+                      {leyendo === "spot" ? "Leyendo…" : spot ? `Parqueo: ${spot} 📸` : "1. Foto parqueo"}
+                    </button>
+                    {spot && (
+                      <input
+                        value={spot}
+                        onChange={(e) => setSpot(e.target.value.toUpperCase())}
+                        placeholder="Editar parqueo"
+                        className="w-full text-center text-xs font-bold uppercase rounded-lg border border-input bg-background py-1.5 px-1 font-mono"
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => verifRef.current?.click()}
+                      disabled={leyendo !== null}
+                      className={cn(
+                        "w-full py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest disabled:opacity-60 border",
+                        verifSpot || verifTerminal
+                          ? "bg-secondary text-foreground border-border"
+                          : "bg-accent text-accent-foreground border-transparent",
+                      )}
+                    >
+                      {leyendo === "verif"
+                        ? "Leyendo…"
+                        : verifSpot || verifTerminal
+                          ? `Verif: ${verifSpot}${verifTerminal ? ` · ${verifTerminal}` : ""} 📸`
+                          : "2. Foto verificación"}
+                    </button>
+                    {verifSpot && (
+                      <input
+                        value={verifSpot}
+                        onChange={(e) => setVerifSpot(e.target.value.toUpperCase())}
+                        placeholder="Editar verificación"
+                        className="w-full text-center text-xs font-bold uppercase rounded-lg border border-input bg-background py-1.5 px-1 font-mono"
+                      />
+                    )}
+                  </div>
                 </div>
 
                 {spot && verifSpot && (
                   <p
                     className={cn(
-                      "text-center text-[11px] font-bold uppercase tracking-widest rounded-lg p-2",
-                      coincide ? "text-green-700 bg-green-600/10" : "text-white bg-red-600",
+                      "text-center text-[11px] font-bold uppercase tracking-widest rounded-lg p-2 border",
+                      coincide
+                        ? "text-green-700 bg-green-600/10 border-green-600/30"
+                        : "text-white bg-red-600 border-red-700",
                     )}
                   >
                     {coincide
-                      ? `Verificado: ${spot} en Terminal ${terminalEsperado}`
-                      : `No coincide: parqueo ${spot} vs ${verifSpot}${verifTerminal ? ` · Terminal ${verifTerminal}` : ""}. Corrige el registro.`}
+                      ? `Verificado: Parqueo ${spot} en Terminal ${terminalEsperado}`
+                      : `Discrepancia: foto (${spot}) vs teléfono (${verifSpot}${verifTerminal ? ` · Term ${verifTerminal}` : ""}). Corrige para cerrar.`}
                   </p>
                 )}
-              </>
+              </div>
             )}
 
+            {/* Botón de Confirmación de Llegada Inviolable */}
             <button
               type="button"
               onClick={() => void confirmarLlegada()}
-              disabled={busy || !enSitio || (mode === "retorno" ? !servicio || !fotoUbicacion || !fotoLlave : !coincide)}
+              disabled={
+                busy ||
+                !enSitio ||
+                !!otroPuntoCercano ||
+                (mode === "retorno" ? !servicio || !fotoUbicacion || !fotoLlave : !coincide)
+              }
               className={cn(
-                "w-full py-4 rounded-xl font-bold uppercase text-xs tracking-widest",
-                enSitio && (mode === "retorno" ? !!servicio && !!fotoUbicacion && !!fotoLlave : coincide)
-                  ? "bg-green-600 text-white"
-                  : "bg-muted text-muted-foreground",
+                "w-full py-4 rounded-xl font-bold uppercase text-xs tracking-widest transition-all",
+                otroPuntoCercano
+                  ? "bg-red-600 text-white cursor-not-allowed"
+                  : enSitio && (mode === "retorno" ? !!servicio && !!fotoUbicacion && !!fotoLlave : coincide)
+                    ? "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-600/30 scale-[1.01]"
+                    : "bg-muted text-muted-foreground cursor-not-allowed",
               )}
             >
-              Llegada
+              {busy
+                ? "Guardando llegada…"
+                : otroPuntoCercano
+                  ? `Bloqueado (Estás en ${otroPuntoCercano.code} · Ve al ${meta?.code})`
+                  : !enSitio
+                    ? `Bloqueado por GPS (A ${Math.round(distancia ?? 0)} m de ${meta?.label})`
+                    : mode === "retorno"
+                      ? !servicio || !fotoUbicacion || !fotoLlave
+                        ? "Faltan fotos requeridas en Base X"
+                        : "Confirmar llegada en Base X ✓"
+                      : !coincide
+                        ? !spot || !verifSpot
+                          ? "Faltan fotos (Parqueo y Verificación)"
+                          : "Parqueo no coincide · Corrige el código"
+                        : `Confirmar llegada en ${meta?.label} ✓`}
             </button>
 
-
-            {meta && distancia !== null && (
-              <p className={cn("text-center text-[11px] font-bold uppercase tracking-widest", enSitio ? "text-green-700" : "text-muted-foreground")}>
-                {enSitio ? `Estás en ${meta.label}` : `A ${Math.round(distancia)} m de ${meta.label}`}
-              </p>
-            )}
-
-            {error && <p className="text-center text-xs font-bold uppercase tracking-widest text-white bg-red-600 rounded-lg p-2">{error}</p>}
+            {error && <p className="text-center text-xs font-bold uppercase tracking-widest text-white bg-red-600 rounded-lg p-2.5 shadow">{error}</p>}
             {message && !error && (
-              <p className="text-center text-xs font-bold uppercase tracking-widest text-primary bg-primary/10 rounded-lg p-2">{message}</p>
+              <p className="text-center text-xs font-bold uppercase tracking-widest text-primary bg-primary/10 rounded-lg p-2.5">{message}</p>
             )}
           </div>
         </>

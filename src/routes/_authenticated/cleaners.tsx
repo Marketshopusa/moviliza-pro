@@ -4,7 +4,9 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard } from "@/lib/vehicle-card.functions";
+import { detectCardColor } from "@/lib/card-color-detector";
 import { saveVehiclePosition } from "@/lib/vehicle-positions.functions";
+import { compressImage } from "@/lib/image-compression";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/cleaners")({
@@ -82,13 +84,17 @@ function CleanersPage() {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  async function handleCard(file: File) {
+  async function handleCard(rawFile: File) {
     setScanning(true);
     setScanMsg(null);
     setError(null);
     try {
-      const dataUrl = await fileToDataUrl(file);
-      const res = await readCard({ data: { image: dataUrl } });
+      const file = await compressImage(rawFile);
+      const [dataUrl, clientColor] = await Promise.all([
+        fileToDataUrl(file),
+        detectCardColor(file),
+      ]);
+      const res = await readCard({ data: { image: dataUrl, clientColor } });
       if (res.plate) setPlate(res.plate);
       if (res.plate_state) setPlateState(res.plate_state);
       if (res.vehicle_model) setModel(res.vehicle_model);
@@ -108,13 +114,14 @@ function CleanersPage() {
     }
   }
 
-  async function handleUbicacion(file: File) {
+  async function handleUbicacion(rawFile: File) {
     if (!user) return;
     setSubiendo(true);
     setError(null);
     setOk(null);
     try {
-      const ext = file.name.split(".").pop() || "jpg";
+      const file = await compressImage(rawFile);
+      const ext = file.name.split(".").pop() || "webp";
       const path = `${user.id}/cleaner-${Date.now()}.${ext}`;
       const { error: upErr } = await supabase.storage.from("vehicle-photos").upload(path, file, { upsert: true });
       if (upErr) throw new Error(upErr.message);

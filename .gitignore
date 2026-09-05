@@ -30,3 +30,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Tesseract trained data & local env
+*.traineddata
+.env
+.env.*
+!.env.example
