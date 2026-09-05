@@ -368,6 +368,35 @@ export type Database = {
           },
         ]
       }
+      voice_channel_secrets: {
+        Row: {
+          channel_id: string
+          created_at: string
+          passcode_hash: string
+          updated_at: string
+        }
+        Insert: {
+          channel_id: string
+          created_at?: string
+          passcode_hash: string
+          updated_at?: string
+        }
+        Update: {
+          channel_id?: string
+          created_at?: string
+          passcode_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_channel_secrets_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: true
+            referencedRelation: "voice_channels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voice_channels: {
         Row: {
           created_at: string
@@ -375,7 +404,6 @@ export type Database = {
           id: string
           is_admin_only: boolean
           name: string
-          passcode_hash: string
           updated_at: string
         }
         Insert: {
@@ -384,7 +412,6 @@ export type Database = {
           id?: string
           is_admin_only?: boolean
           name: string
-          passcode_hash: string
           updated_at?: string
         }
         Update: {
@@ -393,7 +420,6 @@ export type Database = {
           id?: string
           is_admin_only?: boolean
           name?: string
-          passcode_hash?: string
           updated_at?: string
         }
         Relationships: []
