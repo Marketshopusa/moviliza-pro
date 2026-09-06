@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { useLiveVoice } from "@/lib/live-voice";
+import { getWarmMicStream, playRadioTone } from "@/lib/pcm-wav-recorder";
 
 type Channel = { id: string; name: string; is_admin_only: boolean };
 
@@ -30,8 +31,6 @@ export function PushToTalk() {
   const [manageId, setManageId] = useState<string | null>(null);
   const [managePass, setManagePass] = useState("");
 
-  const isHoldingRef = useRef(false);
-
   const channel = channels.find((c) => c.id === channelId) ?? DEFAULT_CHANNEL;
   const isMember = channelId ? memberIds.includes(channelId) : true;
 
@@ -45,10 +44,14 @@ export function PushToTalk() {
 
   const resumeLive = live.resumeAudio;
   useEffect(() => {
-    const handler = () => resumeLive();
-    window.addEventListener("pointerdown", handler);
+    const handler = () => {
+      resumeLive();
+      // Precalentar micrófono tras la primera interacción para que el PTT responda en 0ms
+      void getWarmMicStream().catch(() => {});
+    };
+    window.addEventListener("pointerdown", handler, { passive: true });
     window.addEventListener("touchstart", handler, { passive: true });
-    window.addEventListener("click", handler);
+    window.addEventListener("click", handler, { passive: true });
     return () => {
       window.removeEventListener("pointerdown", handler);
       window.removeEventListener("touchstart", handler);
@@ -176,10 +179,9 @@ export function PushToTalk() {
     void load();
   }
 
-  async function startTalk() {
-    if (isHoldingRef.current) return;
-    isHoldingRef.current = true;
+  const handlePressStart = useCallback(() => {
     live.resumeAudio();
+    setPressed(true);
 
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       try {
@@ -189,20 +191,10 @@ export function PushToTalk() {
       }
     }
 
-    const ok = await live.startTransmit();
-    if (!isHoldingRef.current) {
-      void live.stopTransmit();
-      return;
-    }
-    if (!ok) {
-      isHoldingRef.current = false;
-      setPressed(false);
-    }
-  }
+    void live.startTransmit();
+  }, [live]);
 
-  async function stopTalk() {
-    if (!isHoldingRef.current) return;
-    isHoldingRef.current = false;
+  const handlePressEnd = useCallback(() => {
     setPressed(false);
 
     if (typeof navigator !== "undefined" && navigator.vibrate) {
@@ -214,13 +206,17 @@ export function PushToTalk() {
     }
 
     setStatus("Transmitido");
-    try {
-      await live.stopTransmit();
-      setTimeout(() => setStatus(null), 1200);
-    } catch {
-      setStatus(null);
-    }
-  }
+    void live.stopTransmit();
+    setTimeout(() => setStatus(null), 1200);
+  }, [live]);
+
+  const handleTestSpeaker = useCallback(() => {
+    live.resumeAudio();
+    playRadioTone("start");
+    setTimeout(() => playRadioTone("roger"), 400);
+    setStatus("Altavoz comprobado ✓");
+    setTimeout(() => setStatus(null), 1500);
+  }, [live]);
 
   const visibleChannels = channels.filter((c) => !c.is_admin_only || isSupervisor);
 
@@ -233,30 +229,27 @@ export function PushToTalk() {
           disabled={!isMember}
           onPointerDown={(e) => {
             e.preventDefault();
-            try {
-              (e.target as HTMLElement).setPointerCapture(e.pointerId);
-            } catch {
-              // Ignorar
-            }
-            live.resumeAudio();
-            setPressed(true);
-            void startTalk();
+            handlePressStart();
           }}
           onPointerUp={(e) => {
-            try {
-              (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-            } catch {
-              // Ignorar
-            }
-            void stopTalk();
+            e.preventDefault();
+            handlePressEnd();
           }}
           onPointerCancel={(e) => {
-            try {
-              (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-            } catch {
-              // Ignorar
-            }
-            void stopTalk();
+            e.preventDefault();
+            handlePressEnd();
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            handlePressStart();
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault();
+            handlePressEnd();
+          }}
+          onTouchCancel={(e) => {
+            e.preventDefault();
+            handlePressEnd();
           }}
           onContextMenu={(e) => e.preventDefault()}
           className={`size-20 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
@@ -265,7 +258,7 @@ export function PushToTalk() {
               : `bg-ptt border-ptt/50 hover:brightness-105 active:scale-95 ${isMember ? "" : "opacity-60"}`
           }`}
         >
-          <MicIcon className="size-9 text-white" />
+          <MicIcon className="size-9 text-white pointer-events-none" />
         </button>
         <p className="text-panel-foreground/60 text-[9px] font-bold uppercase tracking-widest">Walkie-talkie</p>
       </div>
@@ -301,15 +294,24 @@ export function PushToTalk() {
             <p className="text-amber-400 font-medium animate-pulse">🟡 Conectando radio…</p>
           )}
 
-          {!live.audioUnlocked && (
+          <div className="flex items-center gap-2 pt-0.5">
             <button
               type="button"
-              onClick={() => live.resumeAudio()}
-              className="text-[9px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-400/40 uppercase animate-bounce mt-0.5"
+              onClick={handleTestSpeaker}
+              className="text-[9px] font-bold text-muted-foreground hover:text-foreground underline decoration-dotted"
             >
-              🔊 Toca aquí para activar altavoz de radio
+              🔊 Probar sonido
             </button>
-          )}
+            {!live.audioUnlocked && (
+              <button
+                type="button"
+                onClick={() => live.resumeAudio()}
+                className="text-[9px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-400/40 uppercase animate-bounce"
+              >
+                Activar altavoz
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

@@ -52,8 +52,8 @@ async function callGeminiVision(prompt: string, imageDataUrl: string): Promise<s
   const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
   const base64Data = rawBase64 || imageDataUrl;
 
-  // Probar con gemini-2.0-flash o gemini-1.5-flash
-  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  // Probar con gemini-flash-latest, gemini-3.5-flash y gemini-flash-lite-latest
+  const models = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-flash-lite-latest"];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;

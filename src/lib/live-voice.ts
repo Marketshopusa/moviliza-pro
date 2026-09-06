@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   PcmWavRecorder,
+  getWarmMicStream,
   isAudioUnlocked,
   playRadioTone,
   playWavAudio,
@@ -62,6 +63,8 @@ export function useLiveVoice(options: {
   const rtRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const recorderRef = useRef<PcmWavRecorder | null>(null);
   const isPressingRef = useRef(false);
+  const isStartingRef = useRef(false);
+  const stopRequestedRef = useRef(false);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uidRef = useRef<string | null>(userId);
   const nameRef = useRef(displayName);
@@ -217,65 +220,15 @@ export function useLiveVoice(options: {
     };
   }, [channelId, enabled, userId, enqueueAudio, onVoicePacketReceived]);
 
-  // Transmitir (Pulsar para hablar)
-  const startTransmit = useCallback(async (): Promise<boolean> => {
-    isPressingRef.current = true;
-    unlockMobileAudio();
-    setState((prev) => ({ ...prev, audioUnlocked: true }));
-
-    if (!recorderRef.current) {
-      recorderRef.current = new PcmWavRecorder();
-    }
-
-    const ok = await recorderRef.current.start();
-    if (!ok || !isPressingRef.current) {
-      recorderRef.current?.stop();
-      recorderRef.current = null;
-      setState((prev) => ({
-        ...prev,
-        micReady: false,
-        isTransmitting: false,
-        error: ok ? null : "Permite el acceso al micrófono en los ajustes de tu navegador",
-      }));
-      return false;
-    }
-
-    setState((prev) => ({ ...prev, micReady: true, isTransmitting: true, error: null }));
-
-    // Avisar en tiempo real que este usuario está hablando
-    void rtRef.current?.send({
-      type: "broadcast",
-      event: "talk_start",
-      payload: {
-        from: uidRef.current,
-        fromClient: clientIdRef.current,
-        name: nameRef.current,
-        at: Date.now(),
-      },
-    });
-
-    playRadioTone("start");
-
-    // Temporizador de seguridad máximo (8 segundos de transmisión continua)
-    if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
-    maxTimerRef.current = setTimeout(() => {
-      if (isPressingRef.current) {
-        void stopTransmit();
-      }
-    }, MAX_BURST_MS);
-
-    return true;
-  }, []);
-
-  // Soltar botón para enviar el audio
-  const stopTransmit = useCallback(async () => {
+  // Ejecución atómica de finalización de transmisión
+  const doStopTransmit = useCallback(async () => {
     if (maxTimerRef.current) {
       clearTimeout(maxTimerRef.current);
       maxTimerRef.current = null;
     }
 
-    const wasPressing = isPressingRef.current;
-    isPressingRef.current = false;
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
     setState((prev) => ({ ...prev, isTransmitting: false }));
 
     // Avisar que terminó de hablar
@@ -289,17 +242,13 @@ export function useLiveVoice(options: {
       },
     });
 
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    if (!recorder || !wasPressing) return;
+    if (!recorder) return;
 
     try {
       const result = await recorder.stop();
-      if (!result) {
-        return;
-      }
+      if (!result) return;
 
-      // Tono roger beep local para confirmación de envío
+      // Roger beep local para confirmar que se envió el audio
       playRadioTone("roger");
 
       // Transmisión inmediata vía WebSocket
@@ -330,6 +279,85 @@ export function useLiveVoice(options: {
       console.error("[LiveVoice Stop] Error al detener y transmitir audio:", err);
     }
   }, []);
+
+  // Transmitir (Pulsar para hablar) - Mutex protegido contra desincronización
+  const startTransmit = useCallback(async (): Promise<boolean> => {
+    if (isStartingRef.current || recorderRef.current) return false;
+    isStartingRef.current = true;
+    stopRequestedRef.current = false;
+    isPressingRef.current = true;
+
+    unlockMobileAudio();
+    setState((prev) => ({ ...prev, audioUnlocked: true }));
+
+    try {
+      const recorder = new PcmWavRecorder();
+      recorderRef.current = recorder;
+
+      const ok = await recorder.start();
+      isStartingRef.current = false;
+
+      if (!ok) {
+        recorderRef.current = null;
+        setState((prev) => ({
+          ...prev,
+          micReady: false,
+          isTransmitting: false,
+          error: "Permite el acceso al micrófono en los ajustes de tu navegador",
+        }));
+        return false;
+      }
+
+      setState((prev) => ({ ...prev, micReady: true, isTransmitting: true, error: null }));
+
+      // Avisar en tiempo real que este usuario está hablando
+      void rtRef.current?.send({
+        type: "broadcast",
+        event: "talk_start",
+        payload: {
+          from: uidRef.current,
+          fromClient: clientIdRef.current,
+          name: nameRef.current,
+          at: Date.now(),
+        },
+      });
+
+      playRadioTone("start");
+
+      // Temporizador de seguridad máximo (8 segundos)
+      if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = setTimeout(() => {
+        void doStopTransmit();
+      }, MAX_BURST_MS);
+
+      // Si el usuario soltó el botón antes de que el micrófono terminara de arrancar:
+      if (stopRequestedRef.current || !isPressingRef.current) {
+        // Permitir que grabe al menos 400ms para capturar la palabra y no cancelarla
+        setTimeout(() => {
+          void doStopTransmit();
+        }, 400);
+      }
+
+      return true;
+    } catch {
+      isStartingRef.current = false;
+      recorderRef.current = null;
+      return false;
+    }
+  }, [doStopTransmit]);
+
+  // Soltar botón para enviar el audio
+  const stopTransmit = useCallback(async () => {
+    isPressingRef.current = false;
+    stopRequestedRef.current = true;
+
+    // Si aún está arrancando el micrófono, el timeout de startTransmit completará la parada
+    if (isStartingRef.current) {
+      return;
+    }
+
+    await doStopTransmit();
+  }, [doStopTransmit]);
 
   return {
     ...state,
