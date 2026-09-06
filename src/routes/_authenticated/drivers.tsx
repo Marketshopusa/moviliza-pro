@@ -401,13 +401,12 @@ function RutaFlow({ mode }: { mode: Mode }) {
     : 0;
   const enSitio = distancia !== null && distancia <= radioPermitido;
 
-  // Detección de Terminal Incorrecto SOLO en la llegada:
-  // Si el conductor está dentro de la geocerca de otro punto diferente a su destino
-  const otroPuntoCercano = position
+  // Detección de Terminal Incorrecto SOLO en la llegada a terminal (modo salida):
+  // Si el conductor llega a un terminal diferente al que tenía asignado
+  const otroPuntoCercano = position && mode === "salida"
     ? (Object.values(PUNTOS) as Punto[]).find((p) => {
         if (!meta || p.code === meta.code) return false;
-        // Si estamos saliendo (inicio), no nos interesa si estamos en el origen
-        if (origen && p.code === origen.code) return false;
+        if (p.code === "X") return false; // Base X es el origen en salida
         return distanciaM(position, p) <= RADIO_POR_PUNTO[p.code];
       }) ?? null
     : null;
@@ -418,27 +417,27 @@ function RutaFlow({ mode }: { mode: Mode }) {
     spot.trim().toUpperCase() === verifSpot.trim().toUpperCase() &&
     (!verifTerminal || verifTerminal === terminalEsperado);
 
-  // FASE 3: Finalizar y Cerrar la Ruta
+  // FASE 3: Finalizar y Cerrar la Ruta (Acción definitiva de cierre)
   async function finalizarViaje() {
     if (!meta || !movementId) return;
 
-    // Validación obligatoria de fotos
+    // Validación de entrega
     if (mode === "retorno") {
-      if (!servicio || !fotoUbicacion || !fotoLlave) {
-        setError("Elige el área de Base X y toma las fotos requeridas (parqueo y llave).");
+      if (!servicio) {
+        setError("Por favor selecciona el área en Base X donde dejas el vehículo (ej. Limpieza general).");
+        return;
+      }
+      if (!fotoUbicacion && !fotoLlave) {
+        setError("Por favor toma la foto de parqueo o de llave en Base X para finalizar.");
         return;
       }
     } else {
-      if (!spot) {
-        setError("Ingresa o toma la foto del número de parqueo.");
+      if (!spot || !spot.trim()) {
+        setError("Por favor ingresa o toma la foto del número de parqueo (ej. D16).");
         return;
       }
-      if (!verifSpot) {
-        setError("Ingresa o toma la foto de verificación de pantalla.");
-        return;
-      }
-      if (spot.trim().toUpperCase() !== verifSpot.trim().toUpperCase()) {
-        setError(`Discrepancia: El parqueo (${spot}) no coincide con la verificación (${verifSpot}). Corrígelo para cerrar.`);
+      if (verifSpot && spot.trim().toUpperCase() !== verifSpot.trim().toUpperCase()) {
+        setError(`Discrepancia: El parqueo ingresado (${spot}) no coincide con la verificación (${verifSpot}). Verifica el código.`);
         return;
       }
       if (verifTerminal && verifTerminal !== terminalEsperado) {
@@ -448,7 +447,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
 
     setBusy(true);
-    const todas = [...new Set([...fotos, ...(mode === "retorno" ? [fotoUbicacion!, fotoLlave!] : [])])];
+    const fotosRetorno = [fotoUbicacion, fotoLlave].filter(Boolean) as string[];
+    const todas = [...new Set([...fotos, ...(mode === "retorno" ? fotosRetorno : [])])];
     const gpsAudit = ` · GPS: ±${Math.round(accuracy ?? 0)}m (distancia al punto: ${Math.round(distancia ?? 0)}m)`;
     const cleanSpot = spot.trim().toUpperCase();
 
@@ -731,6 +731,19 @@ function RutaFlow({ mode }: { mode: Mode }) {
                   : `En camino hacia ${meta?.label} (A ${Math.round(distancia ?? 0)} m)`}
             </button>
 
+            {!enSitio && !otroPuntoCercano && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLlegadaConfirmada(true);
+                  setError(null);
+                }}
+                className="text-[10px] text-muted-foreground underline uppercase tracking-wider text-center block w-full py-1.5 hover:text-foreground cursor-pointer transition-colors"
+              >
+                ¿Problemas de señal GPS en el sótano/parqueo? Confirmar llegada aquí
+              </button>
+            )}
+
             {error && <p className="text-center text-xs font-bold uppercase tracking-widest text-white bg-red-600 rounded-lg p-2.5">{error}</p>}
           </div>
         </>
@@ -854,96 +867,90 @@ function RutaFlow({ mode }: { mode: Mode }) {
           ) : (
             <div className="space-y-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                Fotos obligatorias de entrega en terminal:
+                Datos de Entrega en {meta?.label}:
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
+
+              {/* 1. Número de Parqueo (Piso o Asfalto) */}
+              <div className="space-y-1.5 bg-background/50 border border-border/80 rounded-xl p-3">
+                <label className="text-[11px] font-bold uppercase tracking-wider flex items-center justify-between text-foreground">
+                  <span>1. Número de Parqueo (Piso / Asfalto):</span>
+                  {spot && <span className="text-green-600 text-[10px]">✓ Registrado</span>}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    value={spot}
+                    onChange={(e) => setSpot(e.target.value.toUpperCase())}
+                    placeholder="Ej. D16 o 204"
+                    className="flex-1 text-center text-sm font-bold uppercase rounded-lg border border-input bg-background py-2.5 px-3 font-mono shadow-sm"
+                  />
                   <button
                     type="button"
                     onClick={() => spotRef.current?.click()}
                     disabled={leyendo !== null}
                     className={cn(
-                      "w-full py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest disabled:opacity-60 border transition-all",
-                      spot ? "bg-secondary text-foreground border-border" : "bg-accent text-accent-foreground border-transparent",
+                      "px-3.5 py-2 rounded-lg font-bold uppercase text-xs tracking-wider border transition-all flex items-center gap-1.5 shrink-0",
+                      spot ? "bg-secondary text-foreground border-border" : "bg-primary text-primary-foreground border-transparent shadow",
                     )}
                   >
-                    {leyendo === "spot" ? "Leyendo asfalto…" : spot ? `Parqueo: ${spot} 📸` : "1. Foto parqueo (piso)"}
+                    <span>📷</span>
+                    <span>{leyendo === "spot" ? "Leyendo asfalto…" : "Foto Piso"}</span>
                   </button>
-                  {spot && (
-                    <input
-                      value={spot}
-                      onChange={(e) => setSpot(e.target.value.toUpperCase())}
-                      placeholder="Editar parqueo"
-                      className="w-full text-center text-xs font-bold uppercase rounded-lg border border-input bg-background py-1.5 px-1 font-mono"
-                    />
-                  )}
                 </div>
+              </div>
 
-                <div className="space-y-1">
+              {/* 2. Foto de Verificación de Pantalla (Opcional o complementaria) */}
+              <div className="space-y-1.5 bg-background/50 border border-border/80 rounded-xl p-3">
+                <label className="text-[11px] font-bold uppercase tracking-wider flex items-center justify-between text-muted-foreground">
+                  <span>2. Foto Verificación Pantalla del Teléfono:</span>
+                  <span className="text-[9px] lowercase font-normal">(opcional)</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    value={verifSpot}
+                    onChange={(e) => setVerifSpot(e.target.value.toUpperCase())}
+                    placeholder={spot ? `Verif: ${spot}` : "Ej. D16"}
+                    className="flex-1 text-center text-xs font-bold uppercase rounded-lg border border-input bg-background py-2 px-3 font-mono"
+                  />
                   <button
                     type="button"
                     onClick={() => verifRef.current?.click()}
                     disabled={leyendo !== null}
-                    className={cn(
-                      "w-full py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest disabled:opacity-60 border transition-all",
-                      verifSpot || verifTerminal
-                        ? "bg-secondary text-foreground border-border"
-                        : "bg-accent text-accent-foreground border-transparent",
-                    )}
+                    className="px-3.5 py-2 rounded-lg font-bold uppercase text-xs tracking-wider border bg-accent text-accent-foreground border-transparent shrink-0 flex items-center gap-1.5"
                   >
-                    {leyendo === "verif"
-                      ? "Leyendo pantalla…"
-                      : verifSpot || verifTerminal
-                        ? `Verif: ${verifSpot}${verifTerminal ? ` · ${verifTerminal}` : ""} 📸`
-                        : "2. Foto verificación"}
+                    <span>📱</span>
+                    <span>{leyendo === "verif" ? "Leyendo…" : "Foto Pantalla"}</span>
                   </button>
-                  {verifSpot && (
-                    <input
-                      value={verifSpot}
-                      onChange={(e) => setVerifSpot(e.target.value.toUpperCase())}
-                      placeholder="Editar verificación"
-                      className="w-full text-center text-xs font-bold uppercase rounded-lg border border-input bg-background py-1.5 px-1 font-mono"
-                    />
-                  )}
                 </div>
               </div>
 
               {spot && verifSpot && (
                 <p className={cn(
                   "text-center text-[11px] font-bold uppercase tracking-widest rounded-lg p-2 border",
-                  coincide ? "text-green-700 bg-green-600/10 border-green-600/30" : "text-white bg-red-600 border-red-700",
+                  coincide ? "text-green-700 bg-green-600/10 border-green-600/30" : "text-amber-700 bg-amber-500/10 border-amber-500/30",
                 )}>
                   {coincide
-                    ? `Verificado: Parqueo ${spot} coincide en Terminal ${terminalEsperado}`
-                    : `Discrepancia: Foto (${spot}) vs Teléfono (${verifSpot}). Corrige para poder cerrar.`}
+                    ? `✓ Verificado: Parqueo ${spot} coincide con la pantalla.`
+                    : `Nota: Foto (${spot}) vs Pantalla (${verifSpot}). Asegúrate de que el número sea correcto.`}
                 </p>
               )}
             </div>
           )}
 
-          {/* Botón Final de Cierre */}
+          {/* BOTÓN PROMINENTE DE CIERRE: FINALIZAR RIDE */}
           <button
             type="button"
             onClick={() => void finalizarViaje()}
-            disabled={busy || (mode === "retorno" ? !servicio || !fotoUbicacion || !fotoLlave : !coincide)}
-            className={cn(
-              "w-full py-4 rounded-xl font-bold uppercase text-xs tracking-widest transition-all",
-              (mode === "retorno" ? !!servicio && !!fotoUbicacion && !!fotoLlave : coincide)
-                ? "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-600/30 cursor-pointer"
-                : "bg-muted text-muted-foreground cursor-not-allowed",
-            )}
+            disabled={busy}
+            className="w-full py-4 rounded-xl font-bold uppercase text-xs sm:text-sm tracking-widest bg-green-600 hover:bg-green-700 active:scale-[0.98] text-white shadow-xl shadow-green-600/30 cursor-pointer transition-all flex items-center justify-center gap-2"
           >
-            {busy
-              ? "Cerrando movimiento…"
-              : mode === "retorno"
-                ? !servicio || !fotoUbicacion || !fotoLlave
-                  ? "Faltan fotos en Base X (Parqueo y Llave)"
-                  : "Finalizar y Cerrar Retorno ✓"
-                : !coincide
-                  ? !spot || !verifSpot
-                    ? "Faltan fotos obligatorias de entrega"
-                    : "Parqueo no coincide · Corrige el código"
-                  : `Finalizar y Cerrar Entrega en ${meta?.label} ✓`}
+            <span>🏁</span>
+            <span>
+              {busy
+                ? "Cerrando movimiento…"
+                : mode === "salida"
+                  ? "FINALIZAR RIDE / CERRAR ENTREGA"
+                  : "FINALIZAR RIDE / CERRAR RETORNO"}
+            </span>
           </button>
 
           {error && <p className="text-center text-xs font-bold uppercase tracking-widest text-white bg-red-600 rounded-lg p-2.5">{error}</p>}
