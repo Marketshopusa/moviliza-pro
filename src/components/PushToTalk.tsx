@@ -7,7 +7,7 @@ type Channel = { id: string; name: string; is_admin_only: boolean };
 
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
 
-// Canal por defecto garantizado para que nunca falle la comunicación entre conductores y base
+// Canal operativo universal garantizado para que nunca falle la comunicación base-conductores
 const DEFAULT_CHANNEL: Channel = {
   id: "general",
   name: "Canal 1 · Operaciones",
@@ -23,7 +23,6 @@ export function PushToTalk() {
   const [passcode, setPasscode] = useState("");
   const [pendingJoin, setPendingJoin] = useState<Channel | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -49,9 +48,11 @@ export function PushToTalk() {
     const handler = () => resumeLive();
     window.addEventListener("pointerdown", handler);
     window.addEventListener("touchstart", handler, { passive: true });
+    window.addEventListener("click", handler);
     return () => {
       window.removeEventListener("pointerdown", handler);
       window.removeEventListener("touchstart", handler);
+      window.removeEventListener("click", handler);
     };
   }, [resumeLive]);
 
@@ -63,19 +64,25 @@ export function PushToTalk() {
         supabase.from("voice_channel_members").select("channel_id").eq("user_id", user.id),
       ]);
       const list = (ch as Channel[]) ?? [];
-      const fullList = list.length > 0 ? list : [DEFAULT_CHANNEL];
+      // Asegurar que DEFAULT_CHANNEL siempre esté presente de primero
+      const fullList = [
+        DEFAULT_CHANNEL,
+        ...list.filter((c) => c.id !== "general" && c.name !== DEFAULT_CHANNEL.name),
+      ];
       setChannels(fullList);
 
       // Todos los usuarios autenticados tienen acceso libre a los canales operativos y al canal general
       const openChannelIds = fullList.filter((c) => !c.is_admin_only).map((c) => c.id);
-      const combined = Array.from(new Set(["general", ...openChannelIds, ...(mem ?? []).map((m) => m.channel_id as string)]));
+      const combined = Array.from(
+        new Set(["general", ...openChannelIds, ...(mem ?? []).map((m) => m.channel_id as string)])
+      );
       setMemberIds(combined);
 
       setChannelId((prev) => {
         if (prev && fullList.some((c) => c.id === prev)) return prev;
         const stored = typeof window !== "undefined" ? window.localStorage.getItem(LAST_CHANNEL_KEY) : null;
         if (stored && fullList.some((c) => c.id === stored)) return stored;
-        return fullList[0]?.id ?? "general";
+        return "general";
       });
     } catch {
       setChannels([DEFAULT_CHANNEL]);
@@ -170,35 +177,46 @@ export function PushToTalk() {
   }
 
   async function startTalk() {
-    if (recording) return;
+    if (isHoldingRef.current) return;
     isHoldingRef.current = true;
     live.resumeAudio();
+
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try {
+        navigator.vibrate([40]);
+      } catch {
+        // Ignorar
+      }
+    }
 
     const ok = await live.startTransmit();
     if (!isHoldingRef.current) {
       void live.stopTransmit();
-      setRecording(false);
       return;
     }
-    if (ok) {
-      setRecording(true);
-      setStatus(null);
-    } else {
-      setRecording(false);
+    if (!ok) {
+      isHoldingRef.current = false;
+      setPressed(false);
     }
   }
 
   async function stopTalk() {
+    if (!isHoldingRef.current) return;
     isHoldingRef.current = false;
-    if (!recording) {
-      void live.stopTransmit();
-      return;
+    setPressed(false);
+
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try {
+        navigator.vibrate([25]);
+      } catch {
+        // Ignorar
+      }
     }
-    setRecording(false);
-    setStatus("Enviado");
+
+    setStatus("Transmitido");
     try {
       await live.stopTransmit();
-      setTimeout(() => setStatus(null), 1000);
+      setTimeout(() => setStatus(null), 1200);
     } catch {
       setStatus(null);
     }
@@ -230,7 +248,6 @@ export function PushToTalk() {
             } catch {
               // Ignorar
             }
-            setPressed(false);
             void stopTalk();
           }}
           onPointerCancel={(e) => {
@@ -239,13 +256,12 @@ export function PushToTalk() {
             } catch {
               // Ignorar
             }
-            setPressed(false);
             void stopTalk();
           }}
           onContextMenu={(e) => e.preventDefault()}
           className={`size-20 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
-            pressed || recording
-              ? "bg-ptt-live border-ptt-live/50 scale-110 shadow-[0_0_0_8px] shadow-ptt-live/25"
+            pressed || live.isTransmitting
+              ? "bg-ptt-live border-ptt-live/50 scale-110 shadow-[0_0_0_8px] shadow-ptt-live/25 animate-pulse"
               : `bg-ptt border-ptt/50 hover:brightness-105 active:scale-95 ${isMember ? "" : "opacity-60"}`
           }`}
         >
@@ -255,31 +271,46 @@ export function PushToTalk() {
       </div>
 
       <div className="min-w-0 self-center">
-        <p className="text-sm font-bold truncate leading-tight">{channel ? channel.name : "Canal 1 · Operaciones"}</p>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="mt-1 text-[10px] font-bold uppercase tracking-widest underline decoration-dotted underline-offset-4"
-        >
-          Canales
-        </button>
-        <p className="text-[9px] text-panel-foreground/60 mt-0.5 leading-tight">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-bold truncate leading-tight">{channel ? channel.name : "Canal 1 · Operaciones"}</p>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="text-[10px] font-bold uppercase tracking-widest text-primary underline decoration-dotted underline-offset-4"
+          >
+            Canales
+          </button>
+        </div>
+
+        <div className="text-[10px] text-panel-foreground/75 mt-0.5 leading-tight space-y-0.5">
           {live.error ? (
-            <span className="text-red-400 font-semibold">{live.error}</span>
-          ) : status ? (
-            <span className="text-emerald-400 font-semibold">{status}</span>
-          ) : recording ? (
-            <span className="text-emerald-400 font-bold animate-pulse">● Transmitiendo en vivo…</span>
+            <p className="text-red-400 font-semibold">{live.error}</p>
+          ) : live.isTransmitting ? (
+            <p className="text-emerald-400 font-bold animate-pulse">● Transmitiendo en vivo…</p>
           ) : live.speaker ? (
-            <span className="text-amber-300 font-bold animate-pulse">🔊 Habla {live.speaker}</span>
+            <p className="text-amber-300 font-bold animate-pulse">🔊 Habla {live.speaker}…</p>
+          ) : status ? (
+            <p className="text-emerald-400 font-semibold">{status}</p>
           ) : !isMember ? (
-            "Ingresa la clave del canal"
+            <p className="text-muted-foreground">Ingresa la clave del canal</p>
           ) : live.connected ? (
-            `Radio en línea · ${live.peerCount > 0 ? `${live.peerCount + 1} conectados` : "Listo para hablar"}`
+            <p className="text-emerald-400 font-medium">
+              🟢 {live.peerCount > 0 ? `${live.peerCount + 1} en línea` : "Listo · Esperando compañeros"}
+            </p>
           ) : (
-            "Conectando radio…"
+            <p className="text-amber-400 font-medium animate-pulse">🟡 Conectando radio…</p>
           )}
-        </p>
+
+          {!live.audioUnlocked && (
+            <button
+              type="button"
+              onClick={() => live.resumeAudio()}
+              className="text-[9px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-400/40 uppercase animate-bounce mt-0.5"
+            >
+              🔊 Toca aquí para activar altavoz de radio
+            </button>
+          )}
+        </div>
       </div>
 
       {open && (
@@ -329,7 +360,7 @@ export function PushToTalk() {
                       )}
                     </div>
 
-                    {isAdmin && (
+                    {isAdmin && c.id !== "general" && (
                       <div className="flex items-center gap-2 pt-1 border-t border-border/60 text-[10px]">
                         <button
                           type="button"

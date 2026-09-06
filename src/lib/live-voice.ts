@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   PcmWavRecorder,
-  getGlobalAudioContext,
+  isAudioUnlocked,
   playRadioTone,
   playWavAudio,
   unlockMobileAudio,
@@ -13,8 +13,15 @@ export type LiveVoiceState = {
   peerCount: number;
   speaker: string | null;
   micReady: boolean;
+  isTransmitting: boolean;
+  audioUnlocked: boolean;
   error: string | null;
+  lastPacket: { id: string; from: string; bytes: number; at: number } | null;
 };
+
+// Duración máxima de ráfaga de radio (8 segundos) para garantizar que el paquete WAV
+// nunca sobrepase el límite de 256 KB del WebSocket de Supabase
+const MAX_BURST_MS = 8000;
 
 export function useLiveVoice(options: {
   channelId: string | null;
@@ -30,10 +37,13 @@ export function useLiveVoice(options: {
     peerCount: 0,
     speaker: null,
     micReady: false,
+    isTransmitting: false,
+    audioUnlocked: isAudioUnlocked(),
     error: null,
+    lastPacket: null,
   });
 
-  // ID único por pestaña/dispositivo para permitir pruebas entre dos teléfonos incluso con la misma cuenta de usuario
+  // ID único por pestaña/dispositivo para permitir pruebas entre dos teléfonos incluso con la misma cuenta
   const clientIdRef = useRef<string>(
     typeof window !== "undefined"
       ? (window.sessionStorage?.getItem("movpro.client_id") ??
@@ -52,15 +62,16 @@ export function useLiveVoice(options: {
   const rtRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const recorderRef = useRef<PcmWavRecorder | null>(null);
   const isPressingRef = useRef(false);
+  const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const uidRef = useRef<string | null>(userId);
   const nameRef = useRef(displayName);
-  const audioQueueRef = useRef<{ url: string; who: string }[]>([]);
+  const audioQueueRef = useRef<{ id: string; url: string; who: string; bytes: number }[]>([]);
   const isPlayingAudioRef = useRef(false);
 
   uidRef.current = userId;
   nameRef.current = displayName;
 
-  // Desbloqueo y reproducción en cola
+  // Cola secuencial de reproducción de audio entrante
   const playNextInQueue = useCallback(async () => {
     const next = audioQueueRef.current.shift();
     if (!next) {
@@ -70,25 +81,29 @@ export function useLiveVoice(options: {
     }
 
     isPlayingAudioRef.current = true;
-    setState((prev) => ({ ...prev, speaker: next.who }));
+    setState((prev) => ({
+      ...prev,
+      speaker: next.who,
+      lastPacket: { id: next.id, from: next.who, bytes: next.bytes, at: Date.now() },
+    }));
 
-    // Tono de entrada de radio
+    // Tono de apertura de radio al comenzar a escuchar
     playRadioTone("start");
 
     try {
       await playWavAudio(next.url);
-      // Roger beep al terminar de escuchar
+      // Roger beep al terminar la recepción
       playRadioTone("roger");
-    } catch {
-      // Continuar con el siguiente
+    } catch (err) {
+      console.warn("[LiveVoice Playback] Error reproduciendo audio:", err);
     }
 
     void playNextInQueue();
   }, []);
 
   const enqueueAudio = useCallback(
-    (audioUrl: string, speakerName: string) => {
-      audioQueueRef.current.push({ url: audioUrl, who: speakerName });
+    (id: string, audioUrl: string, speakerName: string, bytesCount: number) => {
+      audioQueueRef.current.push({ id, url: audioUrl, who: speakerName, bytes: bytesCount });
       if (!isPlayingAudioRef.current) {
         void playNextInQueue();
       }
@@ -98,20 +113,21 @@ export function useLiveVoice(options: {
 
   // Conectar al canal de Supabase Realtime Broadcast + Presence
   useEffect(() => {
-    if (!enabled || !channelId || !userId) return;
+    if (!enabled || !userId) return;
 
     let disposed = false;
-    const channelName = `ptt-room-${channelId}`;
+    const safeChannelId = channelId || "general";
+    const channelName = `ptt-room-${safeChannelId}`;
 
     const channel = supabase.channel(channelName, {
       config: {
         presence: { key: clientIdRef.current },
-        broadcast: { self: false, ack: true },
+        broadcast: { self: false, ack: false },
       },
     });
     rtRef.current = channel;
 
-    // Escuchar presencia para saber cuántos conductores están en el canal
+    // Conteo de usuarios presentes en el canal
     const updatePresence = () => {
       if (disposed) return;
       const stateObj = channel.presenceState();
@@ -124,7 +140,7 @@ export function useLiveVoice(options: {
       .on("presence", { event: "join" }, updatePresence)
       .on("presence", { event: "leave" }, updatePresence);
 
-    // Escuchar aviso de que alguien empezó a hablar
+    // Aviso de que otro usuario empezó a hablar
     channel.on("broadcast", { event: "talk_start" }, ({ payload }) => {
       const data = payload as { fromClient: string; name: string };
       if (data.fromClient === clientIdRef.current) return;
@@ -132,7 +148,7 @@ export function useLiveVoice(options: {
       playRadioTone("start");
     });
 
-    // Escuchar aviso de que terminó de hablar
+    // Aviso de que otro usuario terminó de hablar
     channel.on("broadcast", { event: "talk_end" }, ({ payload }) => {
       const data = payload as { fromClient: string };
       if (data.fromClient === clientIdRef.current) return;
@@ -141,25 +157,29 @@ export function useLiveVoice(options: {
       }
     });
 
-    // Escuchar transmisión de voz inmediata por WebSocket
+    // Recepción inmediata del paquete de voz por WebSocket
     channel.on("broadcast", { event: "voice_packet" }, ({ payload }) => {
       const data = payload as {
         id?: string;
         fromClient: string;
         name: string;
         audioData: string;
+        durationMs?: number;
       };
       if (data.fromClient === clientIdRef.current || !data.audioData) return;
-      if (data.id && onVoicePacketReceived) {
-        onVoicePacketReceived(data.id);
+
+      const packetId = data.id || crypto.randomUUID();
+      if (onVoicePacketReceived) {
+        onVoicePacketReceived(packetId);
       }
-      enqueueAudio(data.audioData, data.name);
+      const approxBytes = Math.round((data.audioData.length * 3) / 4);
+      enqueueAudio(packetId, data.audioData, data.name, approxBytes);
     });
 
     channel.subscribe((status) => {
       if (disposed) return;
       if (status === "SUBSCRIBED") {
-        setState((prev) => ({ ...prev, connected: true }));
+        setState((prev) => ({ ...prev, connected: true, error: null }));
         void channel.track({
           name: nameRef.current,
           clientId: clientIdRef.current,
@@ -176,6 +196,10 @@ export function useLiveVoice(options: {
         void supabase.removeChannel(rtRef.current);
         rtRef.current = null;
       }
+      if (maxTimerRef.current) {
+        clearTimeout(maxTimerRef.current);
+        maxTimerRef.current = null;
+      }
       recorderRef.current?.stop();
       recorderRef.current = null;
       audioQueueRef.current = [];
@@ -185,7 +209,10 @@ export function useLiveVoice(options: {
         peerCount: 0,
         speaker: null,
         micReady: false,
+        isTransmitting: false,
+        audioUnlocked: isAudioUnlocked(),
         error: null,
+        lastPacket: null,
       });
     };
   }, [channelId, enabled, userId, enqueueAudio, onVoicePacketReceived]);
@@ -194,6 +221,7 @@ export function useLiveVoice(options: {
   const startTransmit = useCallback(async (): Promise<boolean> => {
     isPressingRef.current = true;
     unlockMobileAudio();
+    setState((prev) => ({ ...prev, audioUnlocked: true }));
 
     if (!recorderRef.current) {
       recorderRef.current = new PcmWavRecorder();
@@ -206,14 +234,15 @@ export function useLiveVoice(options: {
       setState((prev) => ({
         ...prev,
         micReady: false,
-        error: "Permite el acceso al micrófono en los ajustes de tu navegador",
+        isTransmitting: false,
+        error: ok ? null : "Permite el acceso al micrófono en los ajustes de tu navegador",
       }));
       return false;
     }
 
-    setState((prev) => ({ ...prev, micReady: true, error: null }));
+    setState((prev) => ({ ...prev, micReady: true, isTransmitting: true, error: null }));
 
-    // Avisar al canal que este usuario está hablando
+    // Avisar en tiempo real que este usuario está hablando
     void rtRef.current?.send({
       type: "broadcast",
       event: "talk_start",
@@ -226,12 +255,28 @@ export function useLiveVoice(options: {
     });
 
     playRadioTone("start");
+
+    // Temporizador de seguridad máximo (8 segundos de transmisión continua)
+    if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
+    maxTimerRef.current = setTimeout(() => {
+      if (isPressingRef.current) {
+        void stopTransmit();
+      }
+    }, MAX_BURST_MS);
+
     return true;
   }, []);
 
   // Soltar botón para enviar el audio
   const stopTransmit = useCallback(async () => {
+    if (maxTimerRef.current) {
+      clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = null;
+    }
+
+    const wasPressing = isPressingRef.current;
     isPressingRef.current = false;
+    setState((prev) => ({ ...prev, isTransmitting: false }));
 
     // Avisar que terminó de hablar
     void rtRef.current?.send({
@@ -246,27 +291,44 @@ export function useLiveVoice(options: {
 
     const recorder = recorderRef.current;
     recorderRef.current = null;
-    if (!recorder) return;
+    if (!recorder || !wasPressing) return;
 
-    const result = recorder.stop();
-    if (!result) {
-      return;
+    try {
+      const result = await recorder.stop();
+      if (!result) {
+        return;
+      }
+
+      // Tono roger beep local para confirmación de envío
+      playRadioTone("roger");
+
+      // Transmisión inmediata vía WebSocket
+      const msgId = crypto.randomUUID();
+      void rtRef.current?.send({
+        type: "broadcast",
+        event: "voice_packet",
+        payload: {
+          id: msgId,
+          from: uidRef.current,
+          fromClient: clientIdRef.current,
+          name: nameRef.current,
+          audioData: result.wavBase64,
+          durationMs: result.durationMs,
+        },
+      });
+
+      setState((prev) => ({
+        ...prev,
+        lastPacket: {
+          id: msgId,
+          from: "Tú",
+          bytes: Math.round((result.wavBase64.length * 3) / 4),
+          at: Date.now(),
+        },
+      }));
+    } catch (err) {
+      console.error("[LiveVoice Stop] Error al detener y transmitir audio:", err);
     }
-
-    // Transmisión inmediata vía WebSocket
-    const msgId = crypto.randomUUID();
-    void rtRef.current?.send({
-      type: "broadcast",
-      event: "voice_packet",
-      payload: {
-        id: msgId,
-        from: uidRef.current,
-        fromClient: clientIdRef.current,
-        name: nameRef.current,
-        audioData: result.wavBase64,
-        durationMs: result.durationMs,
-      },
-    });
   }, []);
 
   return {
