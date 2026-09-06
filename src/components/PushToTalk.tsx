@@ -6,15 +6,19 @@ import { useLiveVoice } from "@/lib/live-voice";
 type Channel = { id: string; name: string; is_admin_only: boolean };
 
 const LAST_CHANNEL_KEY = "movpro.voice.channel";
-const SILENCE =
-  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
 
+// Canal por defecto garantizado para que nunca falle la comunicación entre conductores y base
+const DEFAULT_CHANNEL: Channel = {
+  id: "general",
+  name: "Canal 1 · Operaciones",
+  is_admin_only: false,
+};
 
 export function PushToTalk() {
   const { user, isSupervisor, isAdmin, profile } = useAuth();
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [memberIds, setMemberIds] = useState<string[]>([]);
-  const [channelId, setChannelId] = useState<string | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([DEFAULT_CHANNEL]);
+  const [memberIds, setMemberIds] = useState<string[]>(["general"]);
+  const [channelId, setChannelId] = useState<string | null>("general");
   const [open, setOpen] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [pendingJoin, setPendingJoin] = useState<Channel | null>(null);
@@ -29,47 +33,61 @@ export function PushToTalk() {
 
   const isHoldingRef = useRef(false);
 
-  const channel = channels.find((c) => c.id === channelId) ?? null;
-  const isMember = channelId ? memberIds.includes(channelId) : false;
+  const channel = channels.find((c) => c.id === channelId) ?? DEFAULT_CHANNEL;
+  const isMember = channelId ? memberIds.includes(channelId) : true;
 
   // Voz centralizada en tiempo real Half-Duplex (100% en memoria / WebSockets, 0 BD)
   const live = useLiveVoice({
-    channelId: isMember ? channelId : null,
-    enabled: isMember,
-    userId: user?.id ?? null,
-    displayName: profile?.initials || profile?.full_name || "Conductor",
+    channelId: channelId || "general",
+    enabled: true,
+    userId: user?.id ?? "driver",
+    displayName: profile?.initials || profile?.full_name || (isSupervisor ? "Supervisor" : "Conductor"),
   });
 
   const resumeLive = live.resumeAudio;
   useEffect(() => {
     const handler = () => resumeLive();
     window.addEventListener("pointerdown", handler);
-    return () => window.removeEventListener("pointerdown", handler);
+    window.addEventListener("touchstart", handler, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", handler);
+      window.removeEventListener("touchstart", handler);
+    };
   }, [resumeLive]);
 
   const load = useCallback(async () => {
     if (!user) return;
-    const [{ data: ch }, { data: mem }] = await Promise.all([
-      supabase.from("voice_channels").select("id, name, is_admin_only").order("created_at"),
-      supabase.from("voice_channel_members").select("channel_id").eq("user_id", user.id),
-    ]);
-    const list = (ch as Channel[]) ?? [];
-    setChannels(list);
-    setMemberIds((mem ?? []).map((m) => m.channel_id as string));
-    setChannelId((prev) => {
-      if (prev) return prev;
-      const stored = typeof window !== "undefined" ? window.localStorage.getItem(LAST_CHANNEL_KEY) : null;
-      if (stored && list.some((c) => c.id === stored)) return stored;
-      return list.find((c) => !c.is_admin_only)?.id ?? list[0]?.id ?? null;
-    });
+    try {
+      const [{ data: ch }, { data: mem }] = await Promise.all([
+        supabase.from("voice_channels").select("id, name, is_admin_only").order("created_at"),
+        supabase.from("voice_channel_members").select("channel_id").eq("user_id", user.id),
+      ]);
+      const list = (ch as Channel[]) ?? [];
+      const fullList = list.length > 0 ? list : [DEFAULT_CHANNEL];
+      setChannels(fullList);
+
+      // Todos los usuarios autenticados tienen acceso libre a los canales operativos y al canal general
+      const openChannelIds = fullList.filter((c) => !c.is_admin_only).map((c) => c.id);
+      const combined = Array.from(new Set(["general", ...openChannelIds, ...(mem ?? []).map((m) => m.channel_id as string)]));
+      setMemberIds(combined);
+
+      setChannelId((prev) => {
+        if (prev && fullList.some((c) => c.id === prev)) return prev;
+        const stored = typeof window !== "undefined" ? window.localStorage.getItem(LAST_CHANNEL_KEY) : null;
+        if (stored && fullList.some((c) => c.id === stored)) return stored;
+        return fullList[0]?.id ?? "general";
+      });
+    } catch {
+      setChannels([DEFAULT_CHANNEL]);
+      setMemberIds(["general"]);
+      setChannelId("general");
+    }
   }, [user]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Refresca la lista cada vez que se abre el selector de canales,
-  // para ver canales creados desde otros dispositivos.
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
@@ -77,8 +95,6 @@ export function PushToTalk() {
   useEffect(() => {
     if (channelId && typeof window !== "undefined") window.localStorage.setItem(LAST_CHANNEL_KEY, channelId);
   }, [channelId]);
-
-
 
   async function join(e: React.FormEvent) {
     e.preventDefault();
@@ -148,19 +164,17 @@ export function PushToTalk() {
       setStatus(error.message);
       return;
     }
-    if (channelId === id) setChannelId(null);
+    if (channelId === id) setChannelId("general");
     setStatus("Canal eliminado");
     void load();
   }
 
-
-
   async function startTalk() {
-    if (!user || !channelId || !isMember || recording) return;
+    if (recording) return;
     isHoldingRef.current = true;
     live.resumeAudio();
+
     const ok = await live.startTransmit();
-    // Si el usuario ya soltó el botón antes de que el micrófono estuviera listo
     if (!isHoldingRef.current) {
       void live.stopTransmit();
       setRecording(false);
@@ -181,10 +195,10 @@ export function PushToTalk() {
       return;
     }
     setRecording(false);
-    setStatus("Transmitido");
+    setStatus("Enviado");
     try {
       await live.stopTransmit();
-      setTimeout(() => setStatus(null), 1200);
+      setTimeout(() => setStatus(null), 1000);
     } catch {
       setStatus(null);
     }
@@ -201,21 +215,30 @@ export function PushToTalk() {
           disabled={!isMember}
           onPointerDown={(e) => {
             e.preventDefault();
+            try {
+              (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            } catch {
+              // Ignorar
+            }
             live.resumeAudio();
             setPressed(true);
             void startTalk();
           }}
-          onPointerUp={() => {
+          onPointerUp={(e) => {
+            try {
+              (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+            } catch {
+              // Ignorar
+            }
             setPressed(false);
             void stopTalk();
           }}
-          onPointerLeave={() => {
-            if (pressed) {
-              setPressed(false);
-              void stopTalk();
+          onPointerCancel={(e) => {
+            try {
+              (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+            } catch {
+              // Ignorar
             }
-          }}
-          onPointerCancel={() => {
             setPressed(false);
             void stopTalk();
           }}
@@ -232,7 +255,7 @@ export function PushToTalk() {
       </div>
 
       <div className="min-w-0 self-center">
-        <p className="text-sm font-bold truncate leading-tight">{channel ? channel.name : "Sin canal"}</p>
+        <p className="text-sm font-bold truncate leading-tight">{channel ? channel.name : "Canal 1 · Operaciones"}</p>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -241,15 +264,21 @@ export function PushToTalk() {
           Canales
         </button>
         <p className="text-[9px] text-panel-foreground/60 mt-0.5 leading-tight">
-          {recording
-            ? "Transmitiendo…"
-            : live.speaker
-              ? `Habla ${live.speaker}`
-              : !isMember
-                ? "Ingresa la clave del canal"
-                : live.peerCount > 0
-                  ? `En vivo · ${live.peerCount} en línea`
-                  : "Mantén presionado para hablar"}
+          {live.error ? (
+            <span className="text-red-400 font-semibold">{live.error}</span>
+          ) : status ? (
+            <span className="text-emerald-400 font-semibold">{status}</span>
+          ) : recording ? (
+            <span className="text-emerald-400 font-bold animate-pulse">● Transmitiendo en vivo…</span>
+          ) : live.speaker ? (
+            <span className="text-amber-300 font-bold animate-pulse">🔊 Habla {live.speaker}</span>
+          ) : !isMember ? (
+            "Ingresa la clave del canal"
+          ) : live.connected ? (
+            `Radio en línea · ${live.peerCount > 0 ? `${live.peerCount + 1} conectados` : "Listo para hablar"}`
+          ) : (
+            "Conectando radio…"
+          )}
         </p>
       </div>
 
@@ -299,108 +328,114 @@ export function PushToTalk() {
                         </button>
                       )}
                     </div>
+
                     {isAdmin && (
-                      <div className="flex gap-3">
+                      <div className="flex items-center gap-2 pt-1 border-t border-border/60 text-[10px]">
                         <button
+                          type="button"
                           onClick={() => {
                             setManageId(manageId === c.id ? null : c.id);
                             setManagePass("");
                           }}
-                          className="text-[10px] font-bold uppercase text-primary"
+                          className="text-muted-foreground hover:underline"
                         >
-                          Cambiar clave
+                          {manageId === c.id ? "Cancelar" : "Cambiar clave"}
                         </button>
+                        <span>·</span>
                         <button
+                          type="button"
                           onClick={() => void removeChannel(c.id, c.name)}
-                          className="text-[10px] font-bold uppercase text-destructive"
+                          className="text-destructive hover:underline"
                         >
-                          Eliminar
+                          Eliminar canal
                         </button>
                       </div>
                     )}
-                    {isAdmin && manageId === c.id && (
-                      <form onSubmit={changePasscode} className="flex gap-2">
+
+                    {manageId === c.id && (
+                      <form onSubmit={changePasscode} className="flex gap-2 pt-2">
                         <input
-                          type="text"
+                          type="password"
+                          inputMode="numeric"
+                          placeholder="Nueva clave (4+)"
                           value={managePass}
                           onChange={(e) => setManagePass(e.target.value)}
-                          placeholder="Nueva clave (mín. 4)"
-                          className="flex-1 border border-border rounded-lg px-3 py-2 text-sm bg-background"
+                          className="flex-1 bg-secondary border border-border rounded px-2 py-1 text-xs"
                         />
-                        <button
-                          type="submit"
-                          disabled={managePass.trim().length < 4}
-                          className="bg-primary text-primary-foreground rounded-lg px-3 text-[10px] font-bold uppercase disabled:opacity-40"
-                        >
+                        <button type="submit" className="bg-primary text-primary-foreground text-[10px] font-bold uppercase px-2.5 py-1 rounded">
                           Guardar
                         </button>
                       </form>
                     )}
                   </li>
-
                 );
               })}
             </ul>
 
-            {pendingJoin && (
-              <form onSubmit={join} className="border border-accent/40 bg-accent/10 rounded-xl p-3 space-y-2">
-                <p className="text-xs font-semibold">Clave de {pendingJoin.name}</p>
-                <input
-                  type="password"
-                  value={passcode}
-                  onChange={(e) => setPasscode(e.target.value)}
-                  placeholder="Clave del canal"
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background"
-                />
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-primary text-primary-foreground rounded-lg py-2 text-xs font-bold uppercase">
-                    Entrar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingJoin(null)}
-                    className="px-3 text-xs font-bold uppercase text-muted-foreground"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </form>
-            )}
-
             {isAdmin && (
               <form onSubmit={createChannel} className="border-t border-border pt-3 space-y-2">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Crear canal de turno</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Crear nuevo canal</p>
                 <input
+                  type="text"
+                  placeholder="Nombre (ej. Noche A)"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Nombre (ej: Turno Noche)"
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background"
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs"
                 />
                 <input
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="Clave numérica (mínimo 4 dígitos)"
                   value={newPass}
                   onChange={(e) => setNewPass(e.target.value)}
-                  placeholder="Clave (mínimo 4 caracteres)"
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background"
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs"
                 />
                 <label className="flex items-center gap-2 text-xs">
                   <input type="checkbox" checked={newAdmin} onChange={(e) => setNewAdmin(e.target.checked)} />
-                  Solo administración
+                  <span>Exclusivo para administradores y supervisores</span>
                 </label>
-                <button
-                  type="submit"
-                  disabled={!newName.trim() || newPass.trim().length < 4}
-                  className="w-full bg-primary text-primary-foreground rounded-lg py-2 text-xs font-bold uppercase disabled:opacity-40"
-                >
+                <button type="submit" className="w-full bg-primary text-primary-foreground font-bold py-2 rounded-lg uppercase text-xs">
                   Crear canal
                 </button>
               </form>
             )}
 
-            {status && <p className="text-xs text-muted-foreground">{status}</p>}
-            <p className="text-[10px] text-muted-foreground">
-              Conectado como {profile?.initials || profile?.full_name || "conductor"}.
-            </p>
+            {status && <p className="text-xs text-center text-muted-foreground">{status}</p>}
           </div>
+        </div>
+      )}
+
+      {pendingJoin && (
+        <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center p-4" onClick={() => setPendingJoin(null)}>
+          <form
+            onSubmit={join}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card text-foreground rounded-2xl p-4 w-full max-w-xs space-y-3"
+          >
+            <h3 className="text-sm font-bold uppercase tracking-widest">Clave de {pendingJoin.name}</h3>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoFocus
+              placeholder="Ingresa la clave"
+              value={passcode}
+              onChange={(e) => setPasscode(e.target.value)}
+              className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-center text-sm font-mono tracking-widest"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingJoin(null)}
+                className="flex-1 bg-secondary text-foreground py-2 rounded-lg text-xs font-bold uppercase"
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="flex-1 bg-primary text-primary-foreground py-2 rounded-lg text-xs font-bold uppercase">
+                Entrar
+              </button>
+            </div>
+            {status && <p className="text-[10px] text-center text-destructive">{status}</p>}
+          </form>
         </div>
       )}
     </div>
@@ -409,10 +444,10 @@ export function PushToTalk() {
 
 function MicIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className} aria-hidden>
-      <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor" stroke="none" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <path d="M12 18v3" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" x2="12" y1="19" y2="22" />
     </svg>
   );
 }

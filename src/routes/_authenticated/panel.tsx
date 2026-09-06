@@ -7,6 +7,7 @@ import { freshnessLabel } from "@/lib/geo";
 import type { SiteCode } from "@/lib/offline";
 import { deleteUser, listUsers, setUserRole, type ManagedUser } from "@/lib/admin.functions";
 import { executeStorageCleanup, type CleanupResult } from "@/lib/storage-cleanup.functions";
+import { PushToTalk } from "@/components/PushToTalk";
 
 export const Route = createFileRoute("/_authenticated/panel")({
   head: () => ({
@@ -313,6 +314,11 @@ function PanelPage() {
           <img src="/moviliza-pro-wordmark.png" alt="MOVILIZA-PRO" className="h-8 w-auto object-contain" width={304} height={26} />
         </h1>
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Panel de supervisión</p>
+      </div>
+
+      {/* Radio Walkie-Talkie para comunicarse directamente con los conductores */}
+      <div className="bg-panel rounded-xl p-4 text-panel-foreground shadow-lg">
+        <PushToTalk />
       </div>
 
       <div className="bg-card border border-border rounded-xl p-4 grid grid-cols-2 gap-3">
