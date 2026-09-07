@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { parsePlateText } from "@/lib/plate-ocr";
 
 export type CardRead = {
@@ -23,18 +22,20 @@ export type SpotRead = {
 };
 
 const CARD_SYSTEM_PROMPT =
-  "Eres un lector experto de tarjetas de vehículos y placas de EE.UU. para flotas de alquiler. " +
-  "Devuelve SOLO un objeto JSON con las siguientes claves: " +
-  "plate_state (código de 2 letras del estado en mayúscula, ej. FL, GA, TX, o null si no aparece), " +
-  "plate (solo caracteres alfanuméricos en mayúscula de la placa, ej. 4AG892, o null), " +
-  "vehicle_model (marca y modelo del vehículo, ej. NISSAN ALTIMA, TOYOTA COROLLA, o null), " +
+  "Eres un lector experto de tarjetas de vehículos, llaveros y placas de EE.UU. para flotas de alquiler de autos. " +
+  "Examina la imagen con máxima atención a textos impresos pequeños, códigos, etiquetas adhesivas y placas. " +
+  "Devuelve EXCLUSIVAMENTE un objeto JSON válido con las siguientes claves: " +
+  "plate_state (código de 2 letras del estado en mayúscula, ej. FL, GA, TX, NM, NY, CA, o null si no aparece), " +
+  "plate (número de placa vehicular, solo caracteres alfanuméricos en mayúscula sin espacios ni guiones, ej. 4AG892 o SLD631, o null), " +
+  "vehicle_model (marca y modelo del vehículo, ej. BMW X2, TOYOTA COROLLA, NISSAN ALTIMA, CHEVROLET MALIBU, o null), " +
   "card_color (color dominante de fondo de la tarjeta o del llavero: usa estrictamente 'amarillo', 'verde', 'azul', 'negro', o null si no se distingue).";
 
 const SPOT_SYSTEM_PROMPT =
-  "Lees fotos de señalización de parqueo o de la pantalla de un teléfono con el registro de un vehículo en un aeropuerto o base. " +
-  "Devuelve SOLO un objeto JSON con las claves: " +
-  "spot (el número o código de parqueo, por ejemplo 'D16' o '204', sin espacios ni guiones, en mayúscula, o null) y " +
-  "terminal (una sola letra: 'A', 'B', 'C' o 'X', o null si no aparece).";
+  "Eres un lector experto de números de parqueo pintados sobre el piso/asfalto, columnas, letreros o pantallas de registro vehicular en aeropuertos. " +
+  "Lee con máxima precisión los caracteres alfanuméricos pintados en el suelo o mostrados en la pantalla. " +
+  "Devuelve EXCLUSIVAMENTE un objeto JSON válido con las claves: " +
+  "spot (el número o código de parqueo, por ejemplo 'D16', 'B04', '204', '112', sin espacios ni guiones, en mayúscula, o null si no se distingue), " +
+  "terminal (terminal del aeropuerto: 'A', 'B', 'C' o 'X', o null si no aparece).";
 
 /**
  * Consulta la API oficial de Google Gemini Vision directamente (sin intermediarios de Lovable).
@@ -329,8 +330,7 @@ export async function processParkingPhoto(data: { image: string }): Promise<Spot
  * 100% independiente de Lovable: utiliza Google Gemini Vision oficial, OpenAI Vision, o Tesseract OCR local.
  */
 export const readVehicleCard = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data) =>
+  .validator((data: unknown) =>
     z
       .object({
         image: z.string().min(20),
@@ -348,8 +348,7 @@ export const readVehicleCard = createServerFn({ method: "POST" })
  * 100% independiente de Lovable.
  */
 export const readParkingPhoto = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((data) => z.object({ image: z.string().min(20) }).parse(data))
+  .validator((data: unknown) => z.object({ image: z.string().min(20) }).parse(data))
   .handler(async ({ data }): Promise<SpotRead> => {
     return processParkingPhoto(data);
   });

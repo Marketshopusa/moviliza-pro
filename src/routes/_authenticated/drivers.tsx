@@ -53,7 +53,35 @@ function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 }
 
 function DriversPage() {
-  const [open, setOpen] = useState<Mode | null>("salida");
+  const { user } = useAuth();
+  const [open, setOpen] = useState<Mode | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("movilizapro_active_driver_trip");
+        if (raw) {
+          const trip = JSON.parse(raw);
+          if (trip.movementId && (trip.mode === "salida" || trip.mode === "retorno")) {
+            return trip.mode;
+          }
+        }
+      } catch {}
+    }
+    return "salida";
+  });
+
+  // Restaurar automáticamente la pestaña si hay un viaje activo guardado
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem("movilizapro_active_driver_trip");
+      if (raw) {
+        const trip = JSON.parse(raw);
+        if (trip.movementId && (trip.mode === "salida" || trip.mode === "retorno")) {
+          setOpen(trip.mode);
+        }
+      }
+    } catch {}
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -68,7 +96,7 @@ function DriversPage() {
             type="button"
             onClick={() => setOpen(open === m ? null : m)}
             className={cn(
-              "py-3 rounded-lg text-sm font-bold uppercase tracking-widest border transition-all",
+              "py-3 rounded-lg text-sm font-bold uppercase tracking-widest border transition-all cursor-pointer",
               open === m ? "bg-primary text-primary-foreground border-primary shadow" : "bg-card border-border text-muted-foreground",
             )}
           >
@@ -123,6 +151,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [fotoLlave, setFotoLlave] = useState<string | null>(null);
   const [fotos, setFotos] = useState<string[]>([]);
   const [subiendo, setSubiendo] = useState<"ubicacion" | "llave" | null>(null);
+  const [cardPhotoUrl, setCardPhotoUrl] = useState<string | null>(null);
 
   // Llegada a terminal: número de parqueo y pantalla de verificación
   const [spot, setSpot] = useState("");
@@ -186,6 +215,117 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }, [mode, position, terminal, movementId]);
 
+  // 1. Restaurar viaje activo desde localStorage y desde Supabase al montar o recargar
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    // A. Leer desde localStorage de inmediato (instantáneo sin esperar a la red)
+    try {
+      const raw = localStorage.getItem("movilizapro_active_driver_trip");
+      if (raw) {
+        const trip = JSON.parse(raw);
+        if (trip.movementId && trip.mode === mode && !cancelled) {
+          setMovementId(trip.movementId);
+          if (trip.plate) setPlate(trip.plate);
+          if (trip.plateState) setPlateState(trip.plateState);
+          if (trip.model) setModel(trip.model);
+          if (trip.terminal) setTerminal(trip.terminal);
+          if (trip.revisado !== undefined) setRevisado(trip.revisado);
+          if (trip.llegadaConfirmada !== undefined) setLlegadaConfirmada(trip.llegadaConfirmada);
+          if (trip.spot) setSpot(trip.spot);
+          if (trip.verifSpot) setVerifSpot(trip.verifSpot);
+          if (trip.verifTerminal) setVerifTerminal(trip.verifTerminal);
+          if (trip.servicio) setServicio(trip.servicio);
+          if (trip.fotoUbicacion) setFotoUbicacion(trip.fotoUbicacion);
+          if (trip.fotoLlave) setFotoLlave(trip.fotoLlave);
+          if (trip.fotos) setFotos(trip.fotos);
+        }
+      }
+    } catch {}
+
+    // B. Consultar Supabase para verificar si hay un viaje 'en_ruta' activo
+    void (async () => {
+      try {
+        const { data: activeMove } = await supabase
+          .from("movements")
+          .select("*")
+          .eq("driver_id", user.id)
+          .eq("status", "en_ruta")
+          .order("occurred_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (activeMove && !cancelled) {
+          const moveMode: Mode = activeMove.origin === "X" ? "salida" : "retorno";
+          if (moveMode === mode) {
+            setMovementId(activeMove.id);
+            if (activeMove.plate) setPlate(activeMove.plate);
+            if (activeMove.plate_state) setPlateState(activeMove.plate_state);
+            if (activeMove.vehicle_model) setModel(activeMove.vehicle_model);
+            if (moveMode === "salida" && activeMove.destination && activeMove.destination !== "X") {
+              setTerminal(activeMove.destination as Code);
+            } else if (moveMode === "retorno" && activeMove.origin && activeMove.origin !== "X") {
+              setTerminal(activeMove.origin as Code);
+            }
+            if (activeMove.photos && activeMove.photos.length) {
+              setFotos(activeMove.photos);
+            }
+          }
+        }
+      } catch {}
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, mode]);
+
+  // 2. Persistir continuamente el viaje activo en localStorage ante cualquier cambio
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (movementId) {
+        const payload = {
+          movementId,
+          mode,
+          plate,
+          plateState,
+          model,
+          terminal,
+          revisado,
+          llegadaConfirmada,
+          spot,
+          verifSpot,
+          verifTerminal,
+          servicio,
+          fotoUbicacion,
+          fotoLlave,
+          fotos,
+        };
+        localStorage.setItem("movilizapro_active_driver_trip", JSON.stringify(payload));
+      } else {
+        localStorage.removeItem("movilizapro_active_driver_trip");
+      }
+    } catch {}
+  }, [
+    movementId,
+    mode,
+    plate,
+    plateState,
+    model,
+    terminal,
+    revisado,
+    llegadaConfirmada,
+    spot,
+    verifSpot,
+    verifTerminal,
+    servicio,
+    fotoUbicacion,
+    fotoLlave,
+    fotos,
+  ]);
+
   async function archivarFoto(rawFile: File, kind: string): Promise<string | null> {
     if (!user) return null;
     try {
@@ -214,6 +354,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
     setScanMsg("Analizando foto con IA de visión de alta precisión…");
     setError(null);
     try {
+      // Previsualización inmediata en el teléfono
+      const localUrl = URL.createObjectURL(rawFile);
+      setCardPhotoUrl(localUrl);
+
       const file = await compressImage(rawFile);
       void archivarFoto(file, "tarjeta");
       const [dataUrl, clientColor] = await Promise.all([
@@ -225,7 +369,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       if (res.plate_state) setPlateState(res.plate_state);
       if (res.vehicle_model) setModel(res.vehicle_model);
 
-      if (mode === "salida" && res.terminal && res.terminal !== "X") {
+      if (res.terminal && res.terminal !== "X") {
         setTerminal(res.terminal);
       }
 
@@ -253,7 +397,11 @@ function RutaFlow({ mode }: { mode: Mode }) {
       if (res.vehicle_model) partes.push(res.vehicle_model);
       if (res.card_color) partes.push(`Color: ${res.card_color} → Terminal ${res.terminal}`);
 
-      setScanMsg(partes.length ? `✓ Leído: ${partes.join(" · ")}` : "No se pudo leer la tarjeta. Puedes ingresar los datos manualmente o intentar de nuevo.");
+      setScanMsg(
+        partes.length
+          ? `✓ Leído por IA: ${partes.join(" · ")}`
+          : "No se pudo leer la tarjeta. Puedes ingresar los datos manualmente o intentar de nuevo."
+      );
     } catch (err) {
       setScanMsg(err instanceof Error ? err.message : "Error al procesar la foto");
     } finally {
@@ -272,16 +420,15 @@ function RutaFlow({ mode }: { mode: Mode }) {
       const res = await readSpot({ data: { image: dataUrl } });
 
       if (kind === "spot") {
-        setSpot(res.spot ?? "");
-        if (!res.spot) {
-          setError("No se leyó automáticamente el número de parqueo en el piso. Puedes escribirlo en el campo inferior.");
+        if (res.spot) {
+          setSpot(res.spot);
+          setMessage(`✓ Parqueo leído por IA: ${res.spot}`);
+        } else {
+          setError("No se leyó con claridad el número en el asfalto. Escríbelo en el campo de texto.");
         }
       } else {
-        setVerifSpot(res.spot ?? "");
-        setVerifTerminal(res.terminal);
-        if (!res.spot && !res.terminal) {
-          setError("No se leyó la pantalla del teléfono. Puedes ingresar el código en el campo de texto.");
-        }
+        if (res.spot) setVerifSpot(res.spot);
+        if (res.terminal) setVerifTerminal(res.terminal);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al leer la foto");
@@ -290,13 +437,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }
 
-  function elegirServicio(s: Servicio) {
-    setPendiente(s);
-    setError(null);
-    ubicacionRef.current?.click();
-  }
-
-  async function subirFotoServicio(rawFile: File, kind: "ubicacion" | "llave") {
+  // Subida de fotos en retorno (parqueo y llave) con respuesta táctil directa
+  async function subirFotoRetorno(rawFile: File, kind: "ubicacion" | "llave") {
     if (!user) return;
     setSubiendo(kind);
     setError(null);
@@ -309,16 +451,20 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setFotos((prev) => [...prev, path]);
       if (kind === "ubicacion") {
         setFotoUbicacion(path);
-        setSubiendo(null);
-        llaveRef.current?.click();
-        return;
+        setMessage("✓ Foto de parqueo en Base X guardada en la nube");
+      } else {
+        setFotoLlave(path);
+        setMessage("✓ Foto de la llave guardada en la nube");
       }
-      setFotoLlave(path);
-      setServicio(pendiente);
-      setPendiente(null);
+      if (movementId) {
+        const nuevas = [...fotos, path];
+        void supabase
+          .from("movements")
+          .update({ photos: nuevas, photo_path: nuevas[0] ?? null })
+          .eq("id", movementId);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al subir la foto");
-      setPendiente(null);
     } finally {
       setSubiendo(null);
     }
@@ -498,6 +644,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setManualOverride(false);
       setManualReason("");
       setFotos([]);
+      setCardPhotoUrl(null);
+      try {
+        localStorage.removeItem("movilizapro_active_driver_trip");
+      } catch {}
     }
   }
 
@@ -533,11 +683,26 @@ function RutaFlow({ mode }: { mode: Mode }) {
             type="button"
             onClick={() => cardRef.current?.click()}
             disabled={scanning}
-            className="w-full py-4 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60 shadow flex items-center justify-center gap-2"
+            className="w-full py-4 rounded-xl bg-accent text-accent-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60 shadow flex items-center justify-center gap-2 cursor-pointer"
           >
             <span>📷</span>
             <span>{scanning ? "Analizando con IA de visión…" : "Tomar foto a la tarjeta / placa"}</span>
           </button>
+          {cardPhotoUrl && (
+            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-secondary/80 border border-border">
+              <img
+                src={cardPhotoUrl}
+                alt="Foto tarjeta"
+                className="w-16 h-12 object-cover rounded-lg border border-border shadow-sm"
+              />
+              <div className="flex-1">
+                <span className="text-[10px] font-bold uppercase text-green-600 block">✓ Foto guardada y analizada</span>
+                <span className="text-xs font-mono font-bold text-foreground">
+                  {plate ? `${plateState} ${plate} ${model ? `· ${model}` : ""}` : "Extrayendo datos de la tarjeta…"}
+                </span>
+              </div>
+            </div>
+          )}
           {scanMsg && <p className="text-xs text-center text-muted-foreground font-medium">{scanMsg}</p>}
 
           {/* Selección o detección de Terminal */}
@@ -641,10 +806,16 @@ function RutaFlow({ mode }: { mode: Mode }) {
           <button
             type="button"
             onClick={() => void iniciarRuta()}
-            disabled={busy || !plate || !terminal || (mode === "salida" ? !revisado : false)}
-            className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-bold uppercase text-xs tracking-widest disabled:opacity-60 shadow-md transition-all"
+            disabled={busy}
+            className={cn(
+              "w-full py-4 rounded-xl font-bold uppercase text-xs sm:text-sm tracking-widest shadow-md transition-all cursor-pointer flex items-center justify-center gap-2",
+              plate && terminal && (mode === "salida" ? revisado : true)
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/25"
+                : "bg-muted text-muted-foreground hover:bg-muted/80",
+            )}
           >
-            {busy ? "Iniciando viaje…" : `Iniciar viaje hacia ${meta ? meta.label : "destino"}`}
+            <span>🚀</span>
+            <span>{busy ? "Iniciando viaje…" : `Iniciar viaje hacia ${meta ? meta.label : "destino"}`}</span>
           </button>
 
           {error && <p className="text-center text-xs font-bold uppercase tracking-widest text-white bg-red-600 rounded-lg p-2.5">{error}</p>}
@@ -804,7 +975,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) void subirFotoServicio(f, "ubicacion");
+              if (f) void subirFotoRetorno(f, "ubicacion");
               e.currentTarget.value = "";
             }}
           />
@@ -816,53 +987,85 @@ function RutaFlow({ mode }: { mode: Mode }) {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) void subirFotoServicio(f, "llave");
+              if (f) void subirFotoRetorno(f, "llave");
               e.currentTarget.value = "";
             }}
           />
 
           {mode === "retorno" ? (
-            <div className="space-y-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                Selecciona el área en Base X donde dejas el vehículo:
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {SERVICIOS.map((s) => {
-                  const activo = servicio === s;
-                  const enProceso = pendiente === s;
-                  const principal = s === "Limpieza general";
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => elegirServicio(s)}
-                      disabled={subiendo !== null}
-                      className={cn(
-                        "py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest border disabled:opacity-50 transition-all",
-                        principal && "col-span-2",
-                        activo
-                          ? "bg-green-600 text-white border-green-600 shadow"
-                          : enProceso
-                            ? "bg-accent text-accent-foreground border-accent"
-                            : "bg-background text-muted-foreground border-border",
-                      )}
-                    >
-                      {enProceso
-                        ? subiendo === "llave"
-                          ? "Tomar foto de la llave…"
-                          : "Tomar foto del parqueo…"
-                        : activo
-                          ? `${s} ✓`
-                          : s}
-                    </button>
-                  );
-                })}
-              </div>
-              {servicio && fotoUbicacion && fotoLlave && (
-                <p className="text-center text-[11px] font-bold uppercase tracking-widest text-green-700 bg-green-600/10 rounded-lg p-2">
-                  {servicio} · Fotos de parqueo y llave completadas ✓
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  1. Área en Base X donde dejas el auto:
                 </p>
-              )}
+                <div className="grid grid-cols-2 gap-2">
+                  {SERVICIOS.map((s) => {
+                    const activo = servicio === s;
+                    const principal = s === "Limpieza general";
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setServicio(s)}
+                        className={cn(
+                          "py-3 rounded-xl font-bold uppercase text-[11px] tracking-widest border transition-all cursor-pointer",
+                          principal && "col-span-2",
+                          activo
+                            ? "bg-green-600 text-white border-green-600 shadow-md shadow-green-600/20"
+                            : "bg-background text-muted-foreground border-border hover:border-primary/50",
+                        )}
+                      >
+                        {activo ? `${s} ✓` : s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-border">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  2. Fotos de entrega en Base X:
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Botón Foto Parqueo */}
+                  <button
+                    type="button"
+                    onClick={() => ubicacionRef.current?.click()}
+                    disabled={subiendo !== null}
+                    className={cn(
+                      "py-3.5 px-2 rounded-xl font-bold uppercase text-[11px] tracking-wider border transition-all flex flex-col items-center justify-center gap-1 cursor-pointer",
+                      fotoUbicacion
+                        ? "bg-green-600/10 border-green-600 text-green-700"
+                        : "bg-accent text-accent-foreground border-transparent hover:border-border",
+                    )}
+                  >
+                    <span className="text-base">📷</span>
+                    <span>{subiendo === "ubicacion" ? "Subiendo…" : fotoUbicacion ? "Parqueo Listo ✓" : "1. Foto Parqueo"}</span>
+                  </button>
+
+                  {/* Botón Foto Llave */}
+                  <button
+                    type="button"
+                    onClick={() => llaveRef.current?.click()}
+                    disabled={subiendo !== null}
+                    className={cn(
+                      "py-3.5 px-2 rounded-xl font-bold uppercase text-[11px] tracking-wider border transition-all flex flex-col items-center justify-center gap-1 cursor-pointer",
+                      fotoLlave
+                        ? "bg-green-600/10 border-green-600 text-green-700"
+                        : "bg-accent text-accent-foreground border-transparent hover:border-border",
+                    )}
+                  >
+                    <span className="text-base">🔑</span>
+                    <span>{subiendo === "llave" ? "Subiendo…" : fotoLlave ? "Llave Lista ✓" : "2. Foto Llave"}</span>
+                  </button>
+                </div>
+
+                {servicio && (fotoUbicacion || fotoLlave) && (
+                  <p className="text-center text-[11px] font-bold uppercase tracking-widest text-green-700 bg-green-600/10 rounded-lg p-2">
+                    {servicio} · {fotoUbicacion ? "Parqueo ✓" : ""} {fotoLlave ? "· Llave ✓" : ""}
+                  </p>
+                )}
+              </div>
             </div>
           ) : (
             <div className="space-y-3">
