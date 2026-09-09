@@ -38,35 +38,30 @@ const SPOT_SYSTEM_PROMPT =
   "terminal (terminal del aeropuerto: 'A', 'B', 'C' o 'X', o null si no aparece).";
 
 /**
- * Consulta la API oficial de Google Gemini Vision directamente (sin intermediarios de Lovable).
+ * Consulta la API oficial de Google Gemini Vision directamente.
  */
 async function callGeminiVision(prompt: string, imageDataUrl: string): Promise<string | null> {
-  const fallbackKey = Buffer.from(
-    "QVEuQWI4Uk42STdwOVc4cHJldjVGQmlVd2htTld0WWh2RWFJNzhJbDNPRkdKcTRkZXZNOHc=",
-    "base64",
-  ).toString("utf-8");
-
   const geminiKey =
     process.env["GEMINI_API_KEY"] ||
     process.env["VITE_GEMINI_API_KEY"] ||
-    process.env["GOOGLE_API_KEY"] ||
-    fallbackKey;
+    process.env["GOOGLE_API_KEY"];
 
-  if (!geminiKey) return null;
+  if (!geminiKey || geminiKey.startsWith("AQ.")) return null;
 
   const [meta, rawBase64] = imageDataUrl.split(",");
   const mimeMatch = meta?.match(/data:(.*?);base64/);
   const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
   const base64Data = rawBase64 || imageDataUrl;
 
-  // Modelos probados y verificados con respuesta 200 OK
-  const models = ["gemini-flash-latest", "gemini-3.5-flash"];
+  // Modelos oficiales vigentes de alta velocidad
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(6000),
         body: JSON.stringify({
           contents: [
             {
@@ -95,8 +90,49 @@ async function callGeminiVision(prompt: string, imageDataUrl: string): Promise<s
         if (text) return text;
       }
     } catch {
-      // Probar siguiente modelo
+      // Continuar al siguiente modelo o fallback
     }
+  }
+  return null;
+}
+
+/**
+ * Consulta la pasarela de IA de Lovable si está presente en el entorno.
+ */
+async function callLovableGateway(prompt: string, imageDataUrl: string): Promise<string | null> {
+  const lovableKey = process.env["LOVABLE_API_KEY"];
+  if (!lovableKey) return null;
+
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(6000),
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: prompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Procesa esta imagen según las instrucciones y devuelve el JSON requerido." },
+              { type: "image_url", image_url: { url: imageDataUrl } },
+            ],
+          },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (res.ok) {
+      const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      return json.choices?.[0]?.message?.content ?? null;
+    }
+  } catch {
+    // Continuar al siguiente motor
   }
   return null;
 }
@@ -118,6 +154,7 @@ async function callOpenAIVision(prompt: string, imageDataUrl: string): Promise<s
         Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(6000),
       body: JSON.stringify({
         model,
         messages: [
@@ -145,20 +182,31 @@ async function callOpenAIVision(prompt: string, imageDataUrl: string): Promise<s
 }
 
 /**
- * Ejecuta OCR local en el servidor mediante Tesseract.js (0 peticiones externas, 0 costos).
+ * Ejecuta OCR local en el servidor con temporizador de seguridad estricto (3.5s)
+ * para garantizar que la interfaz jamás se quede bloqueada.
  */
 async function callLocalOCR(imageDataUrl: string): Promise<string> {
-  try {
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng");
-    const [, rawBase64] = imageDataUrl.split(",");
-    const buffer = Buffer.from(rawBase64 || imageDataUrl, "base64");
-    const result = await worker.recognize(buffer);
-    await worker.terminate();
-    return result.data.text || "";
-  } catch {
-    return "";
-  }
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve("");
+    }, 3500);
+
+    void (async () => {
+      try {
+        const { createWorker } = await import("tesseract.js");
+        const worker = await createWorker("eng");
+        const [, rawBase64] = imageDataUrl.split(",");
+        const buffer = Buffer.from(rawBase64 || imageDataUrl, "base64");
+        const result = await worker.recognize(buffer);
+        clearTimeout(timeout);
+        await worker.terminate().catch(() => {});
+        resolve(result.data.text || "");
+      } catch {
+        clearTimeout(timeout);
+        resolve("");
+      }
+    })();
+  });
 }
 
 const COMMON_MAKES = [
@@ -222,7 +270,12 @@ export async function processVehicleCard(data: {
   // 1. Intentar con Google Gemini Vision (oficial directo)
   let aiRaw = await callGeminiVision(CARD_SYSTEM_PROMPT, data.image);
 
-  // 2. Intentar con OpenAI Vision si no hubo respuesta de Gemini
+  // 2. Intentar con Lovable Gateway si está disponible
+  if (!aiRaw) {
+    aiRaw = await callLovableGateway(CARD_SYSTEM_PROMPT, data.image);
+  }
+
+  // 3. Intentar con OpenAI Vision
   if (!aiRaw) {
     aiRaw = await callOpenAIVision(CARD_SYSTEM_PROMPT, data.image);
   }
@@ -253,7 +306,7 @@ export async function processVehicleCard(data: {
     };
   }
 
-  // 3. Fallback inteligente a OCR Local con Tesseract.js (0 dependencia externa)
+  // 4. Fallback a OCR Local con límite estricto de tiempo
   const ocrText = await callLocalOCR(data.image);
   const plateRead = parsePlateText(ocrText);
   const model = extractVehicleModelFromText(ocrText);
@@ -274,7 +327,12 @@ export async function processParkingPhoto(data: { image: string }): Promise<Spot
   // 1. Intentar con Google Gemini Vision (oficial directo)
   let aiRaw = await callGeminiVision(SPOT_SYSTEM_PROMPT, data.image);
 
-  // 2. Intentar con OpenAI Vision
+  // 2. Intentar con Lovable Gateway
+  if (!aiRaw) {
+    aiRaw = await callLovableGateway(SPOT_SYSTEM_PROMPT, data.image);
+  }
+
+  // 3. Intentar con OpenAI Vision
   if (!aiRaw) {
     aiRaw = await callOpenAIVision(SPOT_SYSTEM_PROMPT, data.image);
   }
