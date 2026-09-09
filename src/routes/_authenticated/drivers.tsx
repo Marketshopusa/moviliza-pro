@@ -268,8 +268,8 @@ function RutaFlow({ mode }: { mode: Mode }) {
             } else if (moveMode === "retorno" && activeMove.origin && activeMove.origin !== "X") {
               setTerminal(activeMove.origin as Code);
             }
-            if (activeMove.photos && activeMove.photos.length) {
-              setFotos(activeMove.photos);
+            if (Array.isArray(activeMove.photos) && activeMove.photos.length > 0) {
+              setFotos(activeMove.photos.filter((p): p is string => typeof p === 'string'));
             }
           }
         }
