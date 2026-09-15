@@ -18,6 +18,14 @@ const DEFAULT_OPTIONS: Required<CompressionOptions> = {
   mimeType: "image/webp",
 };
 
+/** Compresión más nítida solo para fotos de llave/tarjeta (texto pequeño). */
+export const CARD_KEY_COMPRESSION: CompressionOptions = {
+  maxWidth: 1600,
+  maxHeight: 1600,
+  quality: 0.9,
+  mimeType: "image/webp",
+};
+
 /**
  * Comprime un archivo File o Blob en el navegador utilizando HTML5 Canvas.
  * Si el navegador no soporta compresión WebP, automáticamente usa JPEG.

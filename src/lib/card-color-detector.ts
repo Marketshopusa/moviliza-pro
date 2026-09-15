@@ -36,8 +36,14 @@ export async function detectCardColor(imageSource: string | File): Promise<CardC
         let blue = 0;
         let black = 0;
         let validPixels = 0;
+        const margin = Math.floor(size * 0.25);
 
         for (let i = 0; i < imgData.length; i += 4) {
+          const pixelIndex = i / 4;
+          const x = pixelIndex % size;
+          const y = Math.floor(pixelIndex / size);
+          const inCenter = x >= margin && x < size - margin && y >= margin && y < size - margin;
+
           const r = (imgData[i] ?? 0) / 255;
           const g = (imgData[i + 1] ?? 0) / 255;
           const b = (imgData[i + 2] ?? 0) / 255;
@@ -60,9 +66,10 @@ export async function detectCardColor(imageSource: string | File): Promise<CardC
 
           validPixels++;
 
-          // Clasificación de color por rangos de tonalidad y saturación
-          if (v < 0.2 || (s < 0.15 && v < 0.28)) {
-            black++;
+          // El tag SIXT negro suele ocupar el centro: no lo cuentes como Base X.
+          const isBlack = v < 0.2 || (s < 0.15 && v < 0.28);
+          if (isBlack) {
+            if (!inCenter) black++;
           } else if (s > 0.22 && v > 0.28) {
             if (h >= 36 && h <= 68) yellow++;
             else if (h >= 75 && h <= 165) green++;
@@ -83,6 +90,18 @@ export async function detectCardColor(imageSource: string | File): Promise<CardC
 
         candidates.sort((a, b) => b.count - a.count);
         const top = candidates[0];
+        const chromatic = candidates.find((c) => c.color !== "negro");
+
+        // Si hay tarjeta de color visible en márgenes, no dejes que el negro residual gane.
+        if (
+          top?.color === "negro" &&
+          chromatic &&
+          chromatic.count / validPixels >= 0.1 &&
+          chromatic.count > 20
+        ) {
+          resolve(chromatic.color);
+          return;
+        }
 
         // Se requiere un mínimo del 12% de píxeles dominantes de la imagen
         if (top && top.count / validPixels >= 0.12 && top.count > 25) {

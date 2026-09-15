@@ -6,7 +6,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { readVehicleCard } from "@/lib/vehicle-card.functions";
 import { detectCardColor } from "@/lib/card-color-detector";
 import { saveVehiclePosition } from "@/lib/vehicle-positions.functions";
-import { compressImage } from "@/lib/image-compression";
+import { CARD_KEY_COMPRESSION, compressImage } from "@/lib/image-compression";
+import { formatCardScanMessage } from "@/lib/card-scan-message";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/cleaners")({
@@ -89,7 +90,7 @@ function CleanersPage() {
     setScanMsg(null);
     setError(null);
     try {
-      const file = await compressImage(rawFile);
+      const file = await compressImage(rawFile, CARD_KEY_COMPRESSION);
       const [dataUrl, clientColor] = await Promise.all([
         fileToDataUrl(file),
         detectCardColor(file),
@@ -98,15 +99,28 @@ function CleanersPage() {
       if (res.plate) setPlate(res.plate);
       if (res.plate_state) setPlateState(res.plate_state);
       if (res.vehicle_model) setModel(res.vehicle_model);
+      let modelVal = res.vehicle_model;
       if (res.plate && !res.vehicle_model) {
         const { data: veh } = await supabase
           .from("vehicles")
           .select("vehicle_model")
           .eq("plate", res.plate)
           .maybeSingle();
-        if (veh?.vehicle_model) setModel(veh.vehicle_model);
+        if (veh?.vehicle_model) {
+          modelVal = veh.vehicle_model;
+          setModel(veh.vehicle_model);
+        }
       }
-      setScanMsg(res.plate ? `Leído: ${res.plate_state ?? ""} ${res.plate}`.trim() : "No se detectó la tarjeta. Intenta de nuevo.");
+      setScanMsg(
+        formatCardScanMessage({
+          plate: res.plate,
+          plateState: res.plate_state,
+          model: modelVal,
+          terminal: res.terminal,
+          cardColor: res.card_color || clientColor,
+          engine: res.engine,
+        }),
+      );
     } catch (err) {
       setScanMsg(err instanceof Error ? err.message : "Error al leer la foto");
     } finally {

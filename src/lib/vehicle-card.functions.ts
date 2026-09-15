@@ -1,6 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { parsePlateText } from "@/lib/plate-ocr";
+import {
+  parseAiTerminal,
+  terminalFromCardColor,
+  type CardOcrEngine,
+} from "@/lib/card-scan-message";
+import type { CardColor } from "@/lib/card-color-detector";
 
 export type CardRead = {
   plate_state: string | null;
@@ -10,6 +16,7 @@ export type CardRead = {
   card_color: "amarillo" | "verde" | "azul" | "negro" | null;
   /** Terminal deducido del color: A, B, C o X. */
   terminal: "A" | "B" | "C" | "X" | null;
+  engine: CardOcrEngine;
   raw: string;
 };
 
@@ -21,52 +28,101 @@ export type SpotRead = {
   raw: string;
 };
 
+const GEMINI_TIMEOUT_MS = 16_000;
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"] as const;
+
 const CARD_SYSTEM_PROMPT =
-  "Eres un lector experto de tarjetas de vehículos, llaveros y placas de EE.UU. para flotas de alquiler de autos. " +
-  "Examina la imagen con máxima atención a textos impresos pequeños, códigos, etiquetas adhesivas y placas. " +
-  "Devuelve EXCLUSIVAMENTE un objeto JSON válido con las siguientes claves: " +
-  "plate_state (código de 2 letras del estado en mayúscula, ej. FL, GA, TX, NM, NY, CA, o null si no aparece), " +
-  "plate (número de placa vehicular, solo caracteres alfanuméricos en mayúscula sin espacios ni guiones, ej. 4AG892 o SLD631, o null), " +
-  "vehicle_model (marca y modelo del vehículo, ej. BMW X2, TOYOTA COROLLA, NISSAN ALTIMA, CHEVROLET MALIBU, o null), " +
-  "card_color (color dominante de fondo de la tarjeta o del llavero: usa estrictamente 'amarillo', 'verde', 'azul', 'negro', o null si no se distingue).";
+  "Eres un lector experto de tarjetas de vehículos SIXT en el aeropuerto de Orlando (MCO).\n" +
+  "La foto muestra una llave de vehículo con una etiqueta plástica negra rectangular (llavero/tag). " +
+  "IMPORTANTE: La etiqueta PUEDE ESTAR GIRADA 90° O EN CUALQUIER ÁNGULO — rota mentalmente la imagen y lee de todas formas.\n\n" +
+  "PASO 1 — LEE LA ETIQUETA NEGRA DEL LLAVERO (no es la tarjeta de terminal):\n" +
+  "   - Franja negra con letras BLANCAS GRANDES: contiene ESTADO (2 letras) + guión + PLACA. Ejemplo: 'FL – KR158B' o 'FL - BZ691Z'.\n" +
+  "     Pon el estado en plate_state y la placa en plate (sin guiones ni espacios).\n" +
+  "   - Línea debajo de la franja: marca y modelo del auto (ej: BMW SERIES 2, BMW X7, NISSAN ALTIMA). Ponlo en vehicle_model.\n" +
+  "   - Ignora íconos pequeños, combustible, transmisión, color del auto, códigos de barras y texto irrelevante.\n\n" +
+  "PASO 2 — TERMINAL: usa la TARJETA DE COLOR debajo o alrededor de la llave, no el tag negro.\n" +
+  "   - El llavero/tag negro NUNCA es Base X por ser negro.\n" +
+  "   - Fondo AMARILLO o texto Terminal A → terminal: A, card_color: amarillo\n" +
+  "   - Fondo VERDE o texto Terminal B → terminal: B, card_color: verde\n" +
+  "   - Fondo AZUL o texto Terminal C → terminal: C, card_color: azul\n" +
+  "   - Solo si el FONDO de la tarjeta (no el tag) es negro o el texto dice Base X → terminal: X, card_color: negro\n\n" +
+  "Responde ÚNICAMENTE con JSON válido, sin markdown:\n" +
+  '{"plate_state":"FL","plate":"KR158B","vehicle_model":"BMW SERIES 2","card_color":"azul","terminal":"C"}\n' +
+  "Si no puedes leer un campo con certeza, usa null para ese campo.";
 
 const SPOT_SYSTEM_PROMPT =
-  "Eres un lector experto de números de parqueo pintados sobre el piso/asfalto, columnas, letreros o pantallas de registro vehicular en aeropuertos. " +
-  "Lee con máxima precisión los caracteres alfanuméricos pintados en el suelo o mostrados en la pantalla. " +
-  "Devuelve EXCLUSIVAMENTE un objeto JSON válido con las claves: " +
-  "spot (el número o código de parqueo, por ejemplo 'D16', 'B04', '204', '112', sin espacios ni guiones, en mayúscula, o null si no se distingue), " +
+  "Eres un lector experto de números de parqueo pintados sobre el piso/asfalto, columnas, letreros o pantallas de registro vehicular en aeropuertos.\n" +
+  "Lee con máxima precisión los caracteres alfanuméricos pintados en el suelo o mostrados en la pantalla.\n" +
+  "Devuelve EXCLUSIVAMENTE un objeto JSON válido con las claves:\n" +
+  "spot (el número o código de parqueo, por ejemplo 'D16', 'B04', '204', '112', sin espacios ni guiones, en mayúscula, o null si no se distingue),\n" +
   "terminal (terminal del aeropuerto: 'A', 'B', 'C' o 'X', o null si no aparece).";
 
+function buildCardPrompt(clientColor?: CardColor | undefined): string {
+  let hint = "";
+  if (clientColor === "amarillo" || clientColor === "verde" || clientColor === "azul") {
+    hint =
+      `\nPista del detector de márgenes (tarjeta, no el tag): card_color aparente "${clientColor}". ` +
+      "Confírmalo mirando el fondo de color, no el llavero negro.";
+  } else if (clientColor === "negro") {
+    hint =
+      "\nPista del detector de márgenes: hay oscuro en el borde. Puede ser tarjeta Base X. " +
+      "No uses el tag negro como Base X.";
+  }
+  return CARD_SYSTEM_PROMPT + hint;
+}
+
+function ocrLog(level: "log" | "warn" | "error", message: string, extra?: Record<string, unknown>) {
+  if (extra) {
+    console[level](`[ocr] ${message}`, extra);
+    return;
+  }
+  console[level](`[ocr] ${message}`);
+}
+
+function parseGeminiErrorBody(text: string): string {
+  try {
+    const json = JSON.parse(text) as { error?: { message?: string; status?: string } };
+    const msg = json.error?.message;
+    if (typeof msg === "string" && msg.trim()) return msg.slice(0, 180);
+  } catch {
+    // cuerpo no JSON
+  }
+  return text.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
 /**
- * Consulta la API oficial de Google Gemini Vision directamente.
+ * Consulta la API oficial de Google Gemini Vision.
+ * Solo GEMINI_API_KEY de servidor. Nunca registra el valor de la clave.
  */
 async function callGeminiVision(prompt: string, imageDataUrl: string): Promise<string | null> {
-  const geminiKey =
-    process.env["GEMINI_API_KEY"] ||
-    process.env["VITE_GEMINI_API_KEY"] ||
-    process.env["GOOGLE_API_KEY"];
+  const geminiKey = process.env["GEMINI_API_KEY"];
 
-  if (!geminiKey || geminiKey.startsWith("AQ.")) return null;
+  if (!geminiKey) {
+    ocrLog("warn", "GEMINI_API_KEY ausente; se omite Gemini");
+    return null;
+  }
+  if (geminiKey.startsWith("AQ.")) {
+    ocrLog("warn", "GEMINI_API_KEY rechazada: prefijo no soportado");
+    return null;
+  }
 
   const [meta, rawBase64] = imageDataUrl.split(",");
   const mimeMatch = meta?.match(/data:(.*?);base64/);
   const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
   const base64Data = rawBase64 || imageDataUrl;
 
-  // Modelos oficiales vigentes de alta velocidad
-  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
-  for (const model of models) {
+  for (const model of GEMINI_MODELS) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-      const res = await fetch(url, {
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(geminiKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
         body: JSON.stringify({
           contents: [
             {
               parts: [
-                { text: `${prompt}\nExtrae los datos solicitados de esta imagen con máxima precisión.` },
+                { text: prompt },
                 {
                   inline_data: {
                     mime_type: mimeType,
@@ -77,62 +133,41 @@ async function callGeminiVision(prompt: string, imageDataUrl: string): Promise<s
             },
           ],
           generationConfig: {
-            temperature: 0.1,
+            temperature: 0,
+            responseMimeType: "application/json",
           },
         }),
       });
 
-      if (res.ok) {
-        const json = (await res.json()) as {
-          candidates?: { content?: { parts?: { text?: string }[] } }[];
-        };
-        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) return text;
+      if (res.status === 404) {
+        ocrLog("warn", "modelo Gemini no disponible", { model, status: 404 });
+        continue;
       }
-    } catch {
-      // Continuar al siguiente modelo o fallback
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        ocrLog("warn", "Gemini HTTP error", {
+          model,
+          status: res.status,
+          detail: parseGeminiErrorBody(errText),
+        });
+        continue;
+      }
+
+      const json = (await res.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
+      const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text && text.trim()) {
+        ocrLog("log", "Gemini OK", { model });
+        return text;
+      }
+      ocrLog("warn", "Gemini sin texto en candidatos", { model });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "Error";
+      const message = err instanceof Error ? err.message : "unknown";
+      ocrLog("warn", "Gemini excepción", { model, name, message: message.slice(0, 180) });
     }
-  }
-  return null;
-}
-
-/**
- * Consulta la pasarela de IA de Lovable si está presente en el entorno.
- */
-async function callLovableGateway(prompt: string, imageDataUrl: string): Promise<string | null> {
-  const lovableKey = process.env["LOVABLE_API_KEY"];
-  if (!lovableKey) return null;
-
-  try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "Content-Type": "application/json",
-      },
-      signal: AbortSignal.timeout(6000),
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: prompt },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Procesa esta imagen según las instrucciones y devuelve el JSON requerido." },
-              { type: "image_url", image_url: { url: imageDataUrl } },
-            ],
-          },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (res.ok) {
-      const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      return json.choices?.[0]?.message?.content ?? null;
-    }
-  } catch {
-    // Continuar al siguiente motor
   }
   return null;
 }
@@ -142,7 +177,10 @@ async function callLovableGateway(prompt: string, imageDataUrl: string): Promise
  */
 async function callOpenAIVision(prompt: string, imageDataUrl: string): Promise<string | null> {
   const openaiKey = process.env["OPENAI_API_KEY"] || process.env["AI_API_KEY"];
-  if (!openaiKey) return null;
+  if (!openaiKey) {
+    ocrLog("log", "OpenAI/AI_API_KEY ausente; se omite OpenAI Vision");
+    return null;
+  }
 
   const baseUrl = (process.env["AI_BASE_URL"] || "https://api.openai.com/v1").replace(/\/$/, "");
   const model = process.env["AI_MODEL"] || "gpt-4o-mini";
@@ -154,7 +192,7 @@ async function callOpenAIVision(prompt: string, imageDataUrl: string): Promise<s
         Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
       body: JSON.stringify({
         model,
         messages: [
@@ -171,14 +209,20 @@ async function callOpenAIVision(prompt: string, imageDataUrl: string): Promise<s
       }),
     });
 
-    if (res.ok) {
-      const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      return json.choices?.[0]?.message?.content ?? null;
+    if (!res.ok) {
+      ocrLog("warn", "OpenAI Vision HTTP error", { status: res.status, model });
+      return null;
     }
-  } catch {
-    // Continuar al motor local
+
+    const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const content = json.choices?.[0]?.message?.content ?? null;
+    if (content) ocrLog("log", "OpenAI Vision OK", { model });
+    return content;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown";
+    ocrLog("warn", "OpenAI Vision excepción", { message: message.slice(0, 180) });
+    return null;
   }
-  return null;
 }
 
 /**
@@ -188,6 +232,7 @@ async function callOpenAIVision(prompt: string, imageDataUrl: string): Promise<s
 async function callLocalOCR(imageDataUrl: string): Promise<string> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
+      ocrLog("warn", "Tesseract timeout 3.5s");
       resolve("");
     }, 3500);
 
@@ -199,10 +244,15 @@ async function callLocalOCR(imageDataUrl: string): Promise<string> {
         const buffer = Buffer.from(rawBase64 || imageDataUrl, "base64");
         const result = await worker.recognize(buffer);
         clearTimeout(timeout);
-        await worker.terminate().catch(() => {});
+        await worker.terminate().catch((termErr: unknown) => {
+          const message = termErr instanceof Error ? termErr.message : "terminate failed";
+          ocrLog("warn", "Tesseract terminate", { message: message.slice(0, 120) });
+        });
         resolve(result.data.text || "");
-      } catch {
+      } catch (err) {
         clearTimeout(timeout);
+        const message = err instanceof Error ? err.message : "unknown";
+        ocrLog("warn", "Tesseract error", { message: message.slice(0, 180) });
         resolve("");
       }
     })();
@@ -255,102 +305,130 @@ function parseCardColor(rawColor: string | null | undefined): CardRead["card_col
   return null;
 }
 
-function colorToTerminal(color: CardRead["card_color"]): CardRead["terminal"] {
-  if (color === "amarillo") return "A";
-  if (color === "verde") return "B";
-  if (color === "azul") return "C";
-  if (color === "negro") return "X";
-  return null;
+function parseAiJson(aiRaw: string): Record<string, unknown> {
+  const cleanRaw = aiRaw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const match = cleanRaw.match(/\{[\s\S]*\}/);
+  try {
+    return match ? (JSON.parse(match[0]) as Record<string, unknown>) : {};
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "json";
+    ocrLog("warn", "JSON de IA inválido", { message: message.slice(0, 120) });
+    return {};
+  }
+}
+
+function mergeCardRead(input: {
+  parsed: Record<string, unknown>;
+  clientColor?: CardColor | undefined;
+  engine: CardOcrEngine;
+  raw: string;
+  ocrText?: string;
+}): CardRead {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null);
+  const aiColor = parseCardColor(str(input.parsed["card_color"]));
+  const chromaticClient =
+    input.clientColor === "amarillo" ||
+    input.clientColor === "verde" ||
+    input.clientColor === "azul"
+      ? input.clientColor
+      : null;
+  const finalColor = aiColor || chromaticClient || input.clientColor || null;
+  const aiTerminal = parseAiTerminal(input.parsed["terminal"]);
+  const terminal = aiTerminal ?? terminalFromCardColor(finalColor);
+
+  let plate = str(input.parsed["plate"])?.replace(/[^A-Z0-9]/g, "") ?? null;
+  let plateState = str(input.parsed["plate_state"]);
+  let vehicleModel = str(input.parsed["vehicle_model"]);
+
+  if (input.ocrText && (!plate || !plateState || !vehicleModel)) {
+    const plateRead = parsePlateText(input.ocrText);
+    if (!plate && plateRead.plate) plate = plateRead.plate;
+    if (!plateState && plateRead.state) plateState = plateRead.state;
+    if (!vehicleModel) vehicleModel = extractVehicleModelFromText(input.ocrText);
+  }
+
+  return {
+    plate_state: plateState,
+    plate,
+    vehicle_model: vehicleModel,
+    card_color: finalColor,
+    terminal,
+    engine: input.engine,
+    raw: input.raw,
+  };
 }
 
 export async function processVehicleCard(data: {
   image: string;
   clientColor?: CardRead["card_color"] | undefined;
 }): Promise<CardRead> {
-  // 1. Intentar con Google Gemini Vision (oficial directo)
-  let aiRaw = await callGeminiVision(CARD_SYSTEM_PROMPT, data.image);
+  const prompt = buildCardPrompt(data.clientColor);
 
-  // 2. Intentar con Lovable Gateway si está disponible
+  let engine: CardOcrEngine = "none";
+  let aiRaw = await callGeminiVision(prompt, data.image);
+  if (aiRaw) engine = "gemini";
+
   if (!aiRaw) {
-    aiRaw = await callLovableGateway(CARD_SYSTEM_PROMPT, data.image);
+    aiRaw = await callOpenAIVision(prompt, data.image);
+    if (aiRaw) engine = "openai";
   }
 
-  // 3. Intentar con OpenAI Vision
-  if (!aiRaw) {
-    aiRaw = await callOpenAIVision(CARD_SYSTEM_PROMPT, data.image);
-  }
-
-  // Si alguna IA respondió, parsear su JSON estructurado
   if (aiRaw) {
-    const cleanRaw = aiRaw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-    const match = cleanRaw.match(/\{[\s\S]*\}/);
-    let parsed: Record<string, unknown> = {};
-    try {
-      parsed = match ? (JSON.parse(match[0]) as Record<string, unknown>) : {};
-    } catch {
-      parsed = {};
-    }
-
-    const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null);
-    const aiColor = parseCardColor(str(parsed["card_color"]));
-    const finalColor = aiColor || data.clientColor || null;
-    const terminal = colorToTerminal(finalColor);
-
-    return {
-      plate_state: str(parsed["plate_state"]),
-      plate: str(parsed["plate"])?.replace(/[^A-Z0-9]/g, "") ?? null,
-      vehicle_model: str(parsed["vehicle_model"]),
-      card_color: finalColor,
-      terminal,
+    const parsed = parseAiJson(aiRaw);
+    const merged = mergeCardRead({
+      parsed,
+      clientColor: data.clientColor,
+      engine,
       raw: aiRaw,
-    };
+    });
+    if (!merged.plate) {
+      const ocrText = await callLocalOCR(data.image);
+      const filled = mergeCardRead({
+        parsed,
+        clientColor: data.clientColor,
+        engine: ocrText ? "tesseract" : engine,
+        raw: `${aiRaw}\n${ocrText}`,
+        ocrText,
+      });
+      return filled;
+    }
+    return merged;
   }
 
-  // 4. Fallback a OCR Local con límite estricto de tiempo
   const ocrText = await callLocalOCR(data.image);
   const plateRead = parsePlateText(ocrText);
   const model = extractVehicleModelFromText(ocrText);
-  const finalColor = data.clientColor || null;
-  const terminal = colorToTerminal(finalColor);
+  const chromaticClient =
+    data.clientColor === "amarillo" ||
+    data.clientColor === "verde" ||
+    data.clientColor === "azul"
+      ? data.clientColor
+      : null;
+  const finalColor = chromaticClient || data.clientColor || null;
 
   return {
     plate_state: plateRead.state,
     plate: plateRead.plate || null,
     vehicle_model: model,
     card_color: finalColor,
-    terminal,
+    terminal: terminalFromCardColor(finalColor),
+    engine: ocrText ? "tesseract" : "none",
     raw: ocrText,
   };
 }
 
 export async function processParkingPhoto(data: { image: string }): Promise<SpotRead> {
-  // 1. Intentar con Google Gemini Vision (oficial directo)
   let aiRaw = await callGeminiVision(SPOT_SYSTEM_PROMPT, data.image);
 
-  // 2. Intentar con Lovable Gateway
-  if (!aiRaw) {
-    aiRaw = await callLovableGateway(SPOT_SYSTEM_PROMPT, data.image);
-  }
-
-  // 3. Intentar con OpenAI Vision
   if (!aiRaw) {
     aiRaw = await callOpenAIVision(SPOT_SYSTEM_PROMPT, data.image);
   }
 
-  // Si alguna IA respondió
   if (aiRaw) {
-    const cleanRaw = aiRaw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-    const match = cleanRaw.match(/\{[\s\S]*\}/);
-    let parsed: Record<string, unknown> = {};
-    try {
-      parsed = match ? (JSON.parse(match[0]) as Record<string, unknown>) : {};
-    } catch {
-      parsed = {};
-    }
-
-    const spotRaw = typeof parsed["spot"] === "string" ? parsed["spot"].toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
-    const termRaw = typeof parsed["terminal"] === "string" ? parsed["terminal"].toUpperCase().replace(/[^ABCX]/g, "") : "";
-    const terminal = (["A", "B", "C", "X"] as const).find((t) => t === termRaw) ?? null;
+    const parsed = parseAiJson(aiRaw);
+    const spotRaw =
+      typeof parsed["spot"] === "string" ? parsed["spot"].toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+    const terminal = parseAiTerminal(parsed["terminal"]);
 
     return {
       spot: spotRaw || null,
@@ -359,17 +437,14 @@ export async function processParkingPhoto(data: { image: string }): Promise<Spot
     };
   }
 
-  // 3. Fallback inteligente a OCR Local con Tesseract.js
   const ocrText = await callLocalOCR(data.image);
 
-  // Buscar patrones de parqueo habituales (ej. D16, 214, B-04, C12, P-05)
   const spotMatch =
     ocrText.match(/\b([A-Z]\s*[-–]?\s*\d{1,4}|\d{1,4}\s*[-–]?\s*[A-Z])\b/i) ||
     ocrText.match(/(?:SPOT|PARKING|SPACE|LUGAR|CAJ[OÓ]N)\s*[:#]?\s*([A-Z0-9]{2,5})\b/i);
 
   const spotClean = spotMatch?.[1] ? spotMatch[1].replace(/[\s-–]/g, "").toUpperCase() : null;
 
-  // Buscar terminal (A, B, C o X)
   const termMatch =
     ocrText.match(/(?:TERMINAL|TERM|TER)\s*[:#]?\s*([ABCX])\b/i) ||
     ocrText.match(/\b([ABCX])\s*(?:NIVEL|LEVEL|PISO)\b/i);
@@ -384,8 +459,8 @@ export async function processParkingPhoto(data: { image: string }): Promise<Spot
 }
 
 /**
- * Lee la tarjeta/placa del vehículo desde una foto y devuelve estado, placa, modelo y terminal deducido.
- * 100% independiente de Lovable: utiliza Google Gemini Vision oficial, OpenAI Vision, o Tesseract OCR local.
+ * Lee la tarjeta/placa del vehículo desde una foto y devuelve estado, placa, modelo y terminal.
+ * Endpoint sin requireSupabaseAuth (P2). Gate de UI: rutas /_authenticated.
  */
 export const readVehicleCard = createServerFn({ method: "POST" })
   .validator((data: unknown) =>
@@ -403,7 +478,6 @@ export const readVehicleCard = createServerFn({ method: "POST" })
 /**
  * Lee una foto de parqueo o de la pantalla del teléfono y devuelve
  * el número de parqueo y el terminal registrado.
- * 100% independiente de Lovable.
  */
 export const readParkingPhoto = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ image: z.string().min(20) }).parse(data))

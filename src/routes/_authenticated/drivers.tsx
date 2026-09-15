@@ -10,8 +10,9 @@ import { cn } from "@/lib/utils";
 import { ShiftPanel } from "@/components/ShiftPanel";
 import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
 import { VehicleSpotMap } from "@/components/VehicleSpotMap";
-import { compressImage } from "@/lib/image-compression";
+import { CARD_KEY_COMPRESSION, compressImage } from "@/lib/image-compression";
 import { scanPlateFromImage } from "@/lib/plate-ocr";
+import { formatCardScanMessage, terminalFromCardColor } from "@/lib/card-scan-message";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -361,20 +362,16 @@ function RutaFlow({ mode }: { mode: Mode }) {
       const localUrl = URL.createObjectURL(rawFile);
       setCardPhotoUrl(localUrl);
 
-      const file = await compressImage(rawFile);
+      const file = await compressImage(rawFile, CARD_KEY_COMPRESSION);
       void archivarFoto(file, "tarjeta");
       const [dataUrl, clientColor] = await Promise.all([
         fileToDataUrl(file),
         detectCardColor(file),
       ]);
 
-      // Si el análisis rápido del cliente detectó color dominante, fijar terminal de inmediato
-      if (clientColor) {
-        const colorMap: Record<string, Code> = { amarillo: "A", verde: "B", azul: "C", negro: "X" };
-        const termFromColor = colorMap[clientColor];
-        if (termFromColor && termFromColor !== "X" && (!terminal || mode === "salida")) {
-          setTerminal(termFromColor);
-        }
+      const termFromColor = terminalFromCardColor(clientColor);
+      if (termFromColor && termFromColor !== "X" && (!terminal || mode === "salida")) {
+        setTerminal(termFromColor);
       }
 
       const res = await readCard({ data: { image: dataUrl, clientColor } });
@@ -386,50 +383,58 @@ function RutaFlow({ mode }: { mode: Mode }) {
         setTerminal(res.terminal);
       }
 
-      // Si la IA en la nube no retornó placa, intentar escaneo local inmediato en el cliente
+      let engine = res.engine;
       let plateVal = res.plate;
       if (!plateVal) {
         try {
           const localPlate = await scanPlateFromImage(file);
           if (localPlate) {
             plateVal = localPlate;
+            engine = "tesseract";
             setPlate(localPlate);
           }
-        } catch {}
+        } catch (scanErr) {
+          console.warn("[ocr] tesseract cliente", scanErr instanceof Error ? scanErr.message : "error");
+        }
       }
 
-      if (plateVal && !res.vehicle_model) {
+      let modelVal = res.vehicle_model;
+      if (plateVal && !modelVal) {
         const { data: veh } = await supabase
           .from("vehicles")
           .select("vehicle_model")
           .eq("plate", plateVal)
           .maybeSingle();
-        if (veh?.vehicle_model) setModel(veh.vehicle_model);
+        if (veh?.vehicle_model) {
+          modelVal = veh.vehicle_model;
+          setModel(veh.vehicle_model);
+        }
       }
 
       if (plateVal) {
         try {
           setVehPos(await fetchVehPos({ data: { plate: plateVal } }));
-        } catch {
+        } catch (posErr) {
+          console.warn("[ocr] posición vehículo", posErr instanceof Error ? posErr.message : "error");
           setVehPos(null);
         }
       } else {
         setVehPos(null);
       }
 
-      const partes: string[] = [];
-      if (plateVal) partes.push(`Placa: ${res.plate_state ?? ""} ${plateVal}`.trim());
-      if (res.vehicle_model) partes.push(res.vehicle_model);
-      const colorReport = res.card_color || clientColor;
-      if (colorReport) partes.push(`Color: ${colorReport} → Terminal ${res.terminal || (colorReport === "amarillo" ? "A" : colorReport === "verde" ? "B" : "C")}`);
-
       setScanMsg(
-        partes.length
-          ? `✓ Leído por IA: ${partes.join(" · ")}`
-          : "Foto procesada. Puedes verificar o ingresar la información requerida para iniciar."
+        formatCardScanMessage({
+          plate: plateVal,
+          plateState: res.plate_state,
+          model: modelVal,
+          terminal: res.terminal,
+          cardColor: res.card_color || clientColor,
+          engine,
+        }),
       );
-    } catch {
-      setScanMsg("Foto guardada correctamente. Verifica los datos del vehículo para iniciar.");
+    } catch (err) {
+      console.warn("[ocr] handleCard", err instanceof Error ? err.message : "error");
+      setScanMsg("No se pudo leer la foto. Verifica los datos del vehículo para iniciar.");
     } finally {
       setScanning(false);
     }

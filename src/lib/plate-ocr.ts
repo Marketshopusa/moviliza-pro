@@ -26,31 +26,57 @@ const STATE_NAMES: Record<string, string> = {
   INDIANA: "IN",
 };
 
+const ALLOWED_STATE_CODES = new Set(Object.values(STATE_NAMES));
+
 export type PlateRead = { plate: string; state: string | null };
 
+function isPlateToken(token: string): boolean {
+  return PLATE_RE.test(token) && /\d/.test(token) && /[A-Z]/.test(token);
+}
+
+/**
+ * Extrae estado (2 letras) y placa de textos tipo:
+ * FL - KR158B / FL–KR158B / FL KR158B / FL-KR158B / KR158B
+ */
 export function parsePlateText(raw: string): PlateRead {
   const text = raw.toUpperCase();
-  let state: string | null = null;
+
+  let namedState: string | null = null;
   for (const [name, code] of Object.entries(STATE_NAMES)) {
     if (text.includes(name)) {
-      state = code;
+      namedState = code;
       break;
     }
   }
+
+  const comboRe = /\b([A-Z]{2})\s*[-–—]?\s*([A-Z0-9]{5,8})\b/g;
+  const combos: { state: string; plate: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = comboRe.exec(text)) !== null) {
+    const stateCode = match[1];
+    const plateToken = match[2];
+    if (
+      stateCode &&
+      plateToken &&
+      ALLOWED_STATE_CODES.has(stateCode) &&
+      isPlateToken(plateToken)
+    ) {
+      combos.push({ state: stateCode, plate: plateToken });
+    }
+  }
+  if (combos.length > 0) {
+    const best = [...combos].sort((a, b) => b.plate.length - a.plate.length)[0];
+    if (best) return { plate: best.plate, state: best.state };
+  }
+
   const stateWords = new Set(Object.keys(STATE_NAMES).flatMap((n) => n.split(" ")));
   const tokens = text
     .replace(/[^A-Z0-9\n ]/g, " ")
     .split(/\s+/)
     .map((t) => t.trim())
-    .filter(
-      (t) =>
-        PLATE_RE.test(t) &&
-        /\d/.test(t) &&
-        /[A-Z]/.test(t) &&
-        !stateWords.has(t),
-    );
+    .filter((t) => isPlateToken(t) && !stateWords.has(t));
   const plate = tokens.sort((a, b) => b.length - a.length)[0] ?? "";
-  return { plate, state };
+  return { plate, state: namedState };
 }
 
 type MinimalWorker = {
