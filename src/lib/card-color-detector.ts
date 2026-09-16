@@ -1,18 +1,19 @@
 /**
  * Detector de color del lado del cliente (Canvas + HSV).
  *
- * Colores operativos:
- *   naranja  -> Base X
+ * Colores operativos del ESCÁNER (foto):
  *   amarillo -> Terminal A
  *   verde    -> Terminal B
  *   azul     -> Terminal C
  *
+ * Base X es naranja solo en mapa/GPS/UI. No se detecta por foto.
  * El negro (tag SIXT, bordes, sombras) NO es un punto operativo.
+ * `naranja` permanece en el tipo como valor interno no operativo.
  */
 
 export type CardColor = "naranja" | "amarillo" | "verde" | "azul" | "negro" | null;
 
-/** Identidad visual canónica de Base X (Tailwind orange-500). No usar negro. */
+/** Identidad visual canónica de Base X (Tailwind orange-500). No usar en OCR. */
 export const BASE_X_ORANGE_HEX = "#f97316";
 export const BASE_X_ORANGE_BG = "bg-orange-500";
 export const BASE_X_ORANGE_TEXT = "text-white";
@@ -20,10 +21,8 @@ export const BASE_X_ORANGE_RING = "ring-orange-300";
 
 /**
  * Rangos HSV no solapados (hue 0–360).
- * Naranja SIXT/Tailwind ~hue 25°. Amarillo A existente: 36–68.
- * Corte duro en 36: naranja [8, 36), amarillo [36, 68].
+ * Amarillo A: 36–68. Verde B / azul C sin cambio.
  */
-export const HSV_ORANGE = { hMin: 8, hMax: 36, sMin: 0.35, vMin: 0.4 } as const;
 export const HSV_YELLOW = { hMin: 36, hMax: 68, sMin: 0.22, vMin: 0.28 } as const;
 export const HSV_GREEN = { hMin: 75, hMax: 165, sMin: 0.22, vMin: 0.28 } as const;
 export const HSV_BLUE = { hMin: 185, hMax: 260, sMin: 0.22, vMin: 0.28 } as const;
@@ -46,16 +45,9 @@ export function rgbToHsv(r255: number, g255: number, b255: number): { h: number;
   return { h, s, v };
 }
 
-function inHueRange(h: number, min: number, max: number): boolean {
-  return h >= min && h < max;
-}
-
-/** Clasifica un píxel. `negro` es diagnóstico interno; no es ubicación. */
+/** Clasifica un píxel. `negro` es diagnóstico interno; no es ubicación. Naranja no es color de escáner. */
 export function classifyCardPixel(h: number, s: number, v: number): Exclude<CardColor, null> | null {
   if (v < 0.2 || (s < 0.15 && v < 0.28)) return "negro";
-  if (s >= HSV_ORANGE.sMin && v >= HSV_ORANGE.vMin && inHueRange(h, HSV_ORANGE.hMin, HSV_ORANGE.hMax)) {
-    return "naranja";
-  }
   if (s > HSV_YELLOW.sMin && v > HSV_YELLOW.vMin) {
     if (h >= HSV_YELLOW.hMin && h <= HSV_YELLOW.hMax) return "amarillo";
     if (h >= HSV_GREEN.hMin && h <= HSV_GREEN.hMax) return "verde";
@@ -88,7 +80,6 @@ export async function detectCardColor(imageSource: string | File): Promise<CardC
         ctx.drawImage(img, 0, 0, size, size);
         const imgData = ctx.getImageData(0, 0, size, size).data;
 
-        let orange = 0;
         let yellow = 0;
         let green = 0;
         let blue = 0;
@@ -104,19 +95,17 @@ export async function detectCardColor(imageSource: string | File): Promise<CardC
           validPixels++;
 
           const cls = classifyCardPixel(h, s, v);
-          if (cls === "naranja") orange++;
-          else if (cls === "amarillo") yellow++;
+          if (cls === "amarillo") yellow++;
           else if (cls === "verde") green++;
           else if (cls === "azul") blue++;
-          // negro y residuales no votan ubicación
+          // naranja, negro y residuales no votan ubicación
         }
 
         if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
 
         if (validPixels < 50) return resolve(null);
 
-        const candidates: { color: Exclude<CardColor, "negro" | null>; count: number }[] = [
-          { color: "naranja", count: orange },
+        const candidates: { color: "amarillo" | "verde" | "azul"; count: number }[] = [
           { color: "amarillo", count: yellow },
           { color: "verde", count: green },
           { color: "azul", count: blue },

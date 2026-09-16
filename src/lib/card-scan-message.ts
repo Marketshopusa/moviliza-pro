@@ -3,11 +3,10 @@ import type { CardColor } from "@/lib/card-color-detector";
 export type CardOcrEngine = "gemini" | "openai" | "tesseract" | "none";
 
 export function terminalFromCardColor(color: CardColor): "A" | "B" | "C" | "X" | null {
-  if (color === "naranja") return "X";
   if (color === "amarillo") return "A";
   if (color === "verde") return "B";
   if (color === "azul") return "C";
-  // Negro (tag, bordes, sombras) no es un punto operativo.
+  // Naranja (mapa/UI de Base X) y negro (tag, bordes, sombras) no son ubicación OCR.
   return null;
 }
 

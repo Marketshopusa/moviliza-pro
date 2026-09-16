@@ -12,9 +12,9 @@ export type CardRead = {
   plate_state: string | null;
   plate: string | null;
   vehicle_model: string | null;
-  /** Color de fondo de la tarjeta de referencia: naranja, amarillo, verde, azul (negro no es ubicación). */
+  /** Color de fondo de la tarjeta: amarillo/verde/azul. naranja y negro no son ubicación OCR. */
   card_color: "naranja" | "amarillo" | "verde" | "azul" | "negro" | null;
-  /** Terminal deducido del color: A, B, C o X. */
+  /** Terminal deducido del color de foto: A, B o C. X no se infiere por foto. */
   terminal: "A" | "B" | "C" | "X" | null;
   engine: CardOcrEngine;
   raw: string;
@@ -40,9 +40,10 @@ const CARD_SYSTEM_PROMPT =
   "     Pon el estado en plate_state y la placa en plate (sin guiones ni espacios).\n" +
   "   - Línea debajo de la franja: marca y modelo del auto (ej: BMW SERIES 2, BMW X7, NISSAN ALTIMA). Ponlo en vehicle_model.\n" +
   "   - Ignora íconos pequeños, combustible, transmisión, color del auto, códigos de barras y texto irrelevante.\n\n" +
-  "PASO 2 — TERMINAL: usa la TARJETA O CÍRCULO DE COLOR de referencia, no el tag negro.\n" +
-  "   - BLACK / NEGRO NO ES UN COLOR DE TERMINAL. El negro puede ser el tag SIXT, un borde, impresión, sombra o fondo. Nunca infieras X, A, B ni C solo porque haya negro.\n" +
-  "   - Fondo NARANJA / ORANGE o texto Base X → terminal: X, card_color: naranja\n" +
+  "PASO 2 — TERMINAL: usa el FONDO DE COLOR de referencia (tarjeta/círculo), no el tag negro.\n" +
+  "   - Solo A, B o C. Base X NO se determina por foto. Nunca infieras terminal X.\n" +
+  "   - BLACK / NEGRO NO ES UN COLOR DE TERMINAL. El negro puede ser el tag SIXT, un borde, impresión, sombra o fondo.\n" +
+  "   - NARANJA / ORANGE NO ES UN COLOR DE TERMINAL (es solo el marcador de mapa de Base X).\n" +
   "   - Fondo AMARILLO / YELLOW o texto Terminal A → terminal: A, card_color: amarillo\n" +
   "   - Fondo VERDE / GREEN o texto Terminal B → terminal: B, card_color: verde\n" +
   "   - Fondo AZUL / BLUE o texto Terminal C → terminal: C, card_color: azul\n\n" +
@@ -59,12 +60,7 @@ const SPOT_SYSTEM_PROMPT =
 
 function buildCardPrompt(clientColor?: CardColor | undefined): string {
   let hint = "";
-  if (
-    clientColor === "naranja" ||
-    clientColor === "amarillo" ||
-    clientColor === "verde" ||
-    clientColor === "azul"
-  ) {
+  if (clientColor === "amarillo" || clientColor === "verde" || clientColor === "azul") {
     hint =
       `\nPista del detector Canvas (tarjeta de color, no el tag): card_color aparente "${clientColor}". ` +
       "Confírmalo mirando el fondo de color. BLACK/NEGRO no es un terminal.";
@@ -308,7 +304,7 @@ function parseCardColor(rawColor: string | null | undefined): CardRead["card_col
 }
 
 function operationalClientColor(color: CardColor | undefined): CardColor {
-  if (color === "naranja" || color === "amarillo" || color === "verde" || color === "azul") {
+  if (color === "amarillo" || color === "verde" || color === "azul") {
     return color;
   }
   return null;
@@ -336,9 +332,11 @@ function mergeCardRead(input: {
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null);
   const parsedColor = parseCardColor(str(input.parsed["card_color"]));
   const clientOp = operationalClientColor(input.clientColor);
-  const finalColor = (parsedColor && parsedColor !== "negro" ? parsedColor : null) || clientOp || null;
+  const scanColor =
+    parsedColor === "amarillo" || parsedColor === "verde" || parsedColor === "azul" ? parsedColor : null;
+  const finalColor = scanColor || clientOp || null;
   let aiTerminal = parseAiTerminal(input.parsed["terminal"]);
-  if (aiTerminal === "X" && parsedColor === "negro") {
+  if (aiTerminal === "X") {
     aiTerminal = null;
   }
   const terminal = aiTerminal ?? terminalFromCardColor(finalColor);

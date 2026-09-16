@@ -10,7 +10,7 @@ function assertEqual(name: string, actual: unknown, expected: unknown) {
   }
 }
 
-assertEqual("naranja X", terminalFromCardColor("naranja"), "X");
+assertEqual("naranja !OCR X", terminalFromCardColor("naranja"), null);
 assertEqual("amarillo A", terminalFromCardColor("amarillo"), "A");
 assertEqual("verde B", terminalFromCardColor("verde"), "B");
 assertEqual("azul C", terminalFromCardColor("azul"), "C");
@@ -42,8 +42,8 @@ const orangeMsg = formatCardScanMessage({
   cardColor: "naranja",
   engine: "none",
 });
-if (!orangeMsg.includes("Base X") || orangeMsg.includes("OCR IA")) {
-  throw new Error(`naranja should mention Base X without IA: ${orangeMsg}`);
+if (orangeMsg.includes("Base X") || orangeMsg.includes("Terminal")) {
+  throw new Error(`naranja must not produce OCR location: ${orangeMsg}`);
 }
 
 const blackMsg = formatCardScanMessage({
