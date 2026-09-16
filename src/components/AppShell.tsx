@@ -3,15 +3,17 @@ import { useEffect, useState } from "react";
 import { useAuth, type AppRole } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { useLocationBeacon } from "@/lib/geo";
+import { useDriverShift } from "@/lib/driver-shift-context";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const { profile, role, isSupervisor, user } = useAuth();
+  const { shift, loading: shiftLoading } = useDriverShift();
   const [avatar, setAvatar] = useState<string | null>(null);
 
-  // El GPS se activa en el teléfono donde el conductor inicia sesión.
-  useLocationBeacon(user?.id, !isSupervisor);
+  const beaconOn = role === "conductor" && !isSupervisor && !!shift && !shiftLoading;
+  useLocationBeacon(user?.id, beaconOn);
 
   useEffect(() => {
     let active = true;

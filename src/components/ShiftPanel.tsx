@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { markOffShift } from "@/lib/geo";
 import { readPending } from "@/lib/offline";
 import { PushToTalk } from "@/components/PushToTalk";
+import { useDriverShift } from "@/lib/driver-shift-context";
+import { countShiftMovements } from "@/lib/driver-shift";
 
-type Shift = { id: string; started_at: string; ended_at: string | null };
-type Row = { origin: string; destination: string; occurred_at: string };
+type Row = { origin: string; destination: string; shift_id: string | null };
 
 function hhmm(iso: string) {
   return new Date(iso).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" });
@@ -14,29 +14,29 @@ function hhmm(iso: string) {
 
 export function ShiftPanel() {
   const { user } = useAuth();
-  const [shift, setShift] = useState<Shift | null>(null);
+  const { shift, busy, error, endShift } = useDriverShift();
   const [rows, setRows] = useState<Row[]>([]);
   const [online, setOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
 
-  const refresh = useCallback(async () => {
-    if (!user) return;
-    const [{ data: s }, { data: m }] = await Promise.all([
-      supabase.from("shifts").select("id, started_at, ended_at").eq("driver_id", user.id).is("ended_at", null).maybeSingle(),
-      supabase
-        .from("movements")
-        .select("origin, destination, occurred_at")
-        .eq("driver_id", user.id)
-        .order("occurred_at", { ascending: false })
-        .limit(50),
-    ]);
-    setShift((s as Shift) ?? null);
+  const refreshRows = useCallback(async () => {
+    if (!user || !shift) {
+      setRows([]);
+      return;
+    }
+    const { data: m } = await supabase
+      .from("movements")
+      .select("origin, destination, shift_id")
+      .eq("driver_id", user.id)
+      .eq("shift_id", shift.id)
+      .order("occurred_at", { ascending: false })
+      .limit(200);
     setRows((m as Row[]) ?? []);
     setPendingCount(readPending().length);
-  }, [user]);
+  }, [user, shift]);
 
   useEffect(() => {
-    void refresh();
+    void refreshRows();
     setOnline(typeof navigator === "undefined" ? true : navigator.onLine);
     const goOnline = () => setOnline(true);
     const goOffline = () => setOnline(false);
@@ -46,32 +46,11 @@ export function ShiftPanel() {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
     };
-  }, [refresh]);
+  }, [refreshRows]);
 
-  const totals = useMemo(() => {
-    const today = new Date().toDateString();
-    const todays = rows.filter((m) => new Date(m.occurred_at).toDateString() === today);
-    return {
-      total: todays.length,
-      toBase: todays.filter((m) => m.destination === "X").length,
-      fromBase: todays.filter((m) => m.origin === "X").length,
-    };
-  }, [rows]);
+  const totals = useMemo(() => (shift ? countShiftMovements(rows, shift.id) : { total: 0, toBase: 0, fromBase: 0 }), [rows, shift]);
 
-  async function cerrarTurno() {
-    if (!user) return;
-    if (shift) {
-      await supabase.from("shifts").update({ ended_at: new Date().toISOString() }).eq("id", shift.id);
-    }
-    await markOffShift(user.id).catch(() => {});
-    await supabase.auth.signOut();
-  }
-
-  async function iniciarTurno() {
-    if (!user) return;
-    await supabase.from("shifts").insert({ driver_id: user.id });
-    void refresh();
-  }
+  if (!shift) return null;
 
   return (
     <div className="bg-panel rounded-xl p-5 text-panel-foreground shadow-lg">
@@ -88,26 +67,21 @@ export function ShiftPanel() {
           >
             {online ? "En línea" : `Offline · ${pendingCount}`}
           </span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-green-500">En turno</span>
           <span className="text-[10px] uppercase tracking-wider text-panel-foreground/50 text-right">
-            {shift ? `Turno desde ${hhmm(shift.started_at)}` : "Sin turno"}
+            Desde {hhmm(shift.started_at)}
           </span>
-          {shift ? (
-            <button
-              onClick={() => void cerrarTurno()}
-              className="text-[10px] font-bold uppercase tracking-widest bg-red-600 text-white px-3 py-1.5 rounded"
-            >
-              Cerrar turno
-            </button>
-          ) : (
-            <button
-              onClick={() => void iniciarTurno()}
-              className="text-[10px] font-bold uppercase tracking-widest bg-panel-foreground text-panel px-3 py-1.5 rounded"
-            >
-              Iniciar turno
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void endShift()}
+            className="text-sm font-bold bg-red-600 text-white px-4 py-2.5 rounded min-h-11 disabled:opacity-60"
+          >
+            {busy ? "Cerrando…" : "Cerrar turno"}
+          </button>
         </div>
       </div>
+      {error ? <p className="text-xs text-red-400 mb-3 text-right">{error}</p> : null}
       <div className="grid grid-cols-3 gap-4 border-t border-panel-foreground/10 pt-4">
         <div>
           <p className="text-panel-foreground/50 text-[10px] uppercase mb-1">Movimientos</p>

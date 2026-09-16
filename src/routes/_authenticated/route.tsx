@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { AuthProvider } from "@/lib/auth";
+import { DriverShiftProvider } from "@/lib/driver-shift-context";
 import { AppShell } from "@/components/AppShell";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -16,9 +17,11 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
   return (
     <AuthProvider>
-      <AppShell>
-        <Outlet />
-      </AppShell>
+      <DriverShiftProvider>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+      </DriverShiftProvider>
     </AuthProvider>
   );
 }

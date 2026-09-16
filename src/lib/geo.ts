@@ -45,8 +45,8 @@ export function useLocationBeacon(userId: string | null | undefined, enabled: bo
       maximumAge: 30_000,
     });
 
-    // La sesión persiste aunque el usuario cambie de pestaña o minimice la app:
-    // el GPS solo se apaga cuando el usuario presiona SALIR (ver AppShell).
+    // La sesión persiste aunque el usuario cambie de pestaña o minimice la app.
+    // El beacon de presencia solo corre mientras el conductor tiene turno activo.
     return () => {
       active = false;
       navigator.geolocation.clearWatch(watchId);
@@ -55,7 +55,7 @@ export function useLocationBeacon(userId: string | null | undefined, enabled: bo
 
 }
 
-/** Marca la ubicación como fuera de turno (al cerrar sesión / terminar turno). */
+/** Marca la ubicación como fuera de turno al cerrar el turno. */
 export async function markOffShift(userId: string) {
   await supabase.from("driver_locations").update({ is_on_shift: false }).eq("user_id", userId);
 }

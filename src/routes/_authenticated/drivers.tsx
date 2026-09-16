@@ -13,6 +13,12 @@ import { VehicleSpotMap } from "@/components/VehicleSpotMap";
 import { CARD_KEY_COMPRESSION, compressImage } from "@/lib/image-compression";
 import { scanPlateFromImage } from "@/lib/plate-ocr";
 import { formatCardScanMessage, terminalFromCardColor } from "@/lib/card-scan-message";
+import { useDriverShift } from "@/lib/driver-shift-context";
+import {
+  ACTIVE_DRIVER_TRIP_KEY,
+  canInsertDriverMovement,
+  tripBelongsToActiveShift,
+} from "@/lib/driver-shift";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -55,11 +61,13 @@ function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 }
 
 function DriversPage() {
-  const { user } = useAuth();
+  const { role, isSupervisor, profile } = useAuth();
+  const { shift, loading, busy, error, startShift } = useDriverShift();
+  const gateShift = role === "conductor" && !isSupervisor;
   const [open, setOpen] = useState<Mode | null>(() => {
     if (typeof window !== "undefined") {
       try {
-        const raw = localStorage.getItem("movilizapro_active_driver_trip");
+        const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
         if (raw) {
           const trip = JSON.parse(raw);
           if (trip.movementId && (trip.mode === "salida" || trip.mode === "retorno")) {
@@ -71,19 +79,44 @@ function DriversPage() {
     return "salida";
   });
 
-  // Restaurar automáticamente la pestaña si hay un viaje activo guardado
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !shift) return;
     try {
-      const raw = localStorage.getItem("movilizapro_active_driver_trip");
+      const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
       if (raw) {
         const trip = JSON.parse(raw);
-        if (trip.movementId && (trip.mode === "salida" || trip.mode === "retorno")) {
+        if (
+          trip.movementId &&
+          (trip.mode === "salida" || trip.mode === "retorno") &&
+          tripBelongsToActiveShift(trip.shiftId, trip.shiftId, shift.id)
+        ) {
           setOpen(trip.mode);
         }
       }
     } catch {}
-  }, []);
+  }, [shift]);
+
+  if (gateShift && (loading || !shift)) {
+    return (
+      <div className="bg-white rounded-xl min-h-[70vh] px-4 py-8 flex flex-col items-center text-center">
+        <p className="text-base font-semibold text-zinc-900">{profile?.full_name ?? "Driver"}</p>
+        <p className="mt-3 text-sm font-bold text-red-600">Fuera de turno</p>
+        {loading ? (
+          <p className="mt-6 text-sm text-zinc-500">Comprobando turno…</p>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void startShift()}
+            className="mt-6 min-h-11 px-5 py-2.5 rounded-lg bg-green-600 text-white font-bold disabled:opacity-60"
+          >
+            {busy ? "Iniciando…" : "Iniciar turno"}
+          </button>
+        )}
+        {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -107,7 +140,7 @@ function DriversPage() {
         ))}
       </div>
 
-      {open && <RutaFlow key={open} mode={open} />}
+      {open && shift ? <RutaFlow key={`${open}-${shift.id}`} mode={open} /> : null}
     </div>
   );
 }
@@ -118,6 +151,7 @@ type Servicio = (typeof SERVICIOS)[number];
 
 function RutaFlow({ mode }: { mode: Mode }) {
   const { user } = useAuth();
+  const { shift } = useDriverShift();
   const [position, setPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [plateState, setPlateState] = useState("FL");
@@ -224,10 +258,16 @@ function RutaFlow({ mode }: { mode: Mode }) {
 
     // A. Leer desde localStorage de inmediato (instantáneo sin esperar a la red)
     try {
-      const raw = localStorage.getItem("movilizapro_active_driver_trip");
+      const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
       if (raw) {
         const trip = JSON.parse(raw);
-        if (trip.movementId && trip.mode === mode && !cancelled) {
+        if (
+          trip.movementId &&
+          trip.mode === mode &&
+          shift &&
+          tripBelongsToActiveShift(trip.shiftId, trip.shiftId, shift.id) &&
+          !cancelled
+        ) {
           setMovementId(trip.movementId);
           if (trip.plate) setPlate(trip.plate);
           if (trip.plateState) setPlateState(trip.plateState);
@@ -249,10 +289,12 @@ function RutaFlow({ mode }: { mode: Mode }) {
     // B. Consultar Supabase para verificar si hay un viaje 'en_ruta' activo
     void (async () => {
       try {
+        if (!shift) return;
         const { data: activeMove } = await supabase
           .from("movements")
           .select("*")
           .eq("driver_id", user.id)
+          .eq("shift_id", shift.id)
           .eq("status", "en_ruta")
           .order("occurred_at", { ascending: false })
           .limit(1)
@@ -281,7 +323,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
     return () => {
       cancelled = true;
     };
-  }, [user, mode]);
+  }, [user, mode, shift]);
 
   // 2. Persistir continuamente el viaje activo en localStorage ante cualquier cambio
   useEffect(() => {
@@ -290,6 +332,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       if (movementId) {
         const payload = {
           movementId,
+          shiftId: shift?.id ?? null,
           mode,
           plate,
           plateState,
@@ -305,13 +348,14 @@ function RutaFlow({ mode }: { mode: Mode }) {
           fotoLlave,
           fotos,
         };
-        localStorage.setItem("movilizapro_active_driver_trip", JSON.stringify(payload));
+        localStorage.setItem(ACTIVE_DRIVER_TRIP_KEY, JSON.stringify(payload));
       } else {
-        localStorage.removeItem("movilizapro_active_driver_trip");
+        localStorage.removeItem(ACTIVE_DRIVER_TRIP_KEY);
       }
     } catch {}
   }, [
     movementId,
+    shift?.id,
     mode,
     plate,
     plateState,
@@ -528,6 +572,11 @@ function RutaFlow({ mode }: { mode: Mode }) {
       return;
     }
 
+    if (!shift || !canInsertDriverMovement(shift.id)) {
+      setError("Inicia un turno antes de registrar un movimiento.");
+      return;
+    }
+
     setBusy(true);
     setError(null);
 
@@ -544,6 +593,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       .from("movements")
       .insert({
         driver_id: user.id,
+        shift_id: shift.id,
         plate_state: plateState,
         plate,
         vehicle_model: model || null,
@@ -676,7 +726,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
       setFotos([]);
       setCardPhotoUrl(null);
       try {
-        localStorage.removeItem("movilizapro_active_driver_trip");
+        localStorage.removeItem(ACTIVE_DRIVER_TRIP_KEY);
       } catch {}
     }
   }
