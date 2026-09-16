@@ -9,6 +9,7 @@ import {
   canCloseShift,
   decideStartShift,
   inspectOpenShifts,
+  movementIsLiveForShift,
   type DriverShift,
 } from "@/lib/driver-shift";
 
@@ -45,12 +46,16 @@ async function loadOpenShifts(driverId: string): Promise<{ shifts: DriverShift[]
   return { shifts: (data as DriverShift[]) ?? [], error: null };
 }
 
-async function hasOpenTrip(driverId: string): Promise<{ active: boolean; error: string | null }> {
+async function hasOpenTrip(
+  driverId: string,
+  shiftId: string,
+): Promise<{ active: boolean; error: string | null }> {
   try {
     const { data, error } = await supabase
       .from("movements")
       .select("id")
       .eq("driver_id", driverId)
+      .eq("shift_id", shiftId)
       .eq("status", "en_ruta")
       .limit(1);
 
@@ -59,15 +64,15 @@ async function hasOpenTrip(driverId: string): Promise<{ active: boolean; error: 
 
     const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
     if (!raw) return { active: false, error: null };
-    const trip = JSON.parse(raw) as { movementId?: string };
+    const trip = JSON.parse(raw) as { movementId?: string; shiftId?: string | null };
     if (!trip.movementId) return { active: false, error: null };
     const { data: live } = await supabase
       .from("movements")
-      .select("id, status")
+      .select("id, status, shift_id")
       .eq("id", trip.movementId)
       .eq("driver_id", driverId)
       .maybeSingle();
-    return { active: live?.status === "en_ruta", error: null };
+    return { active: movementIsLiveForShift(live, shiftId), error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     return { active: false, error: message };
@@ -241,6 +246,7 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
         return !!confirmed.current;
       }
       shiftLog("started", { id: confirmed.current.id, startedAt: confirmed.current.started_at });
+      clearStaleTripCache();
       setShift(confirmed.current);
       return true;
     } finally {
@@ -274,7 +280,7 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
       const target = inspected.current?.id === shift.id ? inspected.current : inspected.current ?? shift;
       shiftLog("active shift id", { requested: shift.id, loaded: inspected.current?.id ?? null });
 
-      const trip = await hasOpenTrip(user.id);
+      const trip = await hasOpenTrip(user.id, target.id);
       if (trip.error) {
         shiftLog("close trip check failed", { error: trip.error });
         setError(trip.error);

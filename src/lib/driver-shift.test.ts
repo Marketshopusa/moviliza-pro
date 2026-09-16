@@ -52,9 +52,11 @@ assertEqual("counter total by shift not date", counts.total, 2);
 assertEqual("counter from base includes after midnight", counts.fromBase, 1);
 assertEqual("counter to base includes after midnight", counts.toBase, 1);
 
-assertEqual("trip matches stored shift", tripBelongsToActiveShift("s1", "s0", "s1"), true);
+assertEqual("stamped cache cannot override movement shift", tripBelongsToActiveShift("s1", "s0", "s1"), false);
 assertEqual("stale trip rejected", tripBelongsToActiveShift("s0", "s0", "s1"), false);
+assertEqual("both ids current", tripBelongsToActiveShift("s1", "s1", "s1"), true);
 assertEqual("movement shift used if no stored", tripBelongsToActiveShift(null, "s1", "s1"), true);
+assertEqual("no ids never restore", tripBelongsToActiveShift(null, null, "s1"), false);
 
 const picked = pickActiveShift([
   { id: "old", started_at: "2026-09-14T18:00:00.000Z", ended_at: "2026-09-14T20:00:00.000Z" },
@@ -95,6 +97,11 @@ assertEqual("gate on", resolveShiftGate(false, false, shift), "on");
 assertEqual("gate off", resolveShiftGate(false, false, null), "off");
 assertEqual("no Buscar turno in drivers", readFileSync(join(dir, "../routes/_authenticated/drivers.tsx"), "utf8").includes("Buscar turno"), false);
 assertEqual("no Buscar turno in shift panel", shiftPanel.includes("Buscar turno"), false);
+assertEqual("shift panel online badge", shiftPanel.includes("EN LÍNEA"), true);
+assertEqual("shift panel close label", shiftPanel.includes("Cerrar turno"), true);
+if (shiftPanel.includes("SIN TURNO") || shiftPanel.includes("ELEGIR TURNO")) {
+  throw new Error("ShiftPanel must not show redundant off-shift copy");
+}
 if (shiftPanel.includes("signOut")) {
   throw new Error("ShiftPanel must not sign out on close");
 }

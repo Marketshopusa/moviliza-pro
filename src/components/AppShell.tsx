@@ -6,6 +6,15 @@ import { useLocationBeacon } from "@/lib/geo";
 import { useDriverShift } from "@/lib/driver-shift-context";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
+import {
+  Car,
+  LayoutDashboard,
+  Radio,
+  Sparkles,
+  History,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const { profile, role, isSupervisor, user, loading: authLoading } = useAuth();
@@ -44,14 +53,18 @@ export function AppShell({ children }: { children?: ReactNode }) {
     };
   }, [profile?.avatar_url, authLoading]);
 
-
   const perfilIncompleto = !!profile && (!profile.avatar_url || !profile.initials);
 
   return (
-    <div className={cn("min-h-dvh max-w-full overflow-x-hidden font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
+    <div
+      className={cn(
+        "min-h-dvh w-full max-w-full min-w-0 font-sans",
+        role === "administrador" ? "bg-background-admin" : "bg-background",
+      )}
+    >
       <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border pt-[env(safe-area-inset-top)]">
         <div className="mx-auto max-w-5xl w-full min-w-0 px-3 sm:px-4 flex items-center justify-between py-2 gap-2">
-          <Link to="/" className="flex flex-col items-center leading-none">
+          <Link to="/drivers" className="flex flex-col items-center leading-none min-w-0">
             <img
               src="/logo-moviliza-pro-icon.png"
               alt="MOVILIZA-PRO"
@@ -67,11 +80,20 @@ export function AppShell({ children }: { children?: ReactNode }) {
               height={26}
             />
           </Link>
-          <div className="flex flex-col items-center gap-1">
-            <Link to="/perfil" className="size-14 rounded-xl overflow-hidden bg-panel text-panel-foreground grid place-items-center text-sm font-mono font-bold shadow-sm">
+          <div className="flex flex-col items-center gap-1 shrink-0">
+            <Link
+              to="/perfil"
+              className="size-14 rounded-xl overflow-hidden bg-panel text-panel-foreground grid place-items-center text-sm font-mono font-bold shadow-sm"
+            >
               {avatar ? (
-                <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
-              ) : authLoading ? null : (
+                <img
+                  src={avatar}
+                  alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`}
+                  className="size-full object-cover"
+                />
+              ) : authLoading || (!!profile?.avatar_url && !avatar) ? (
+                <span className="size-4 rounded-full border-2 border-muted-foreground/40 border-t-transparent animate-spin" />
+              ) : (
                 (profile?.initials ?? "?")
               )}
             </Link>
@@ -79,7 +101,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl w-full min-w-0 px-3 sm:px-4 py-5 pb-[calc(5.75rem+env(safe-area-inset-bottom))] space-y-6 overflow-x-hidden">
+      <main className="mx-auto max-w-5xl w-full min-w-0 px-3 sm:px-4 py-5 pb-[calc(5.75rem+env(safe-area-inset-bottom))] space-y-6">
         {perfilIncompleto && (
           <Link
             to="/perfil"
@@ -91,13 +113,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
         {children ?? <Outlet />}
       </main>
       <nav className="fixed bottom-0 inset-x-0 z-20 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto max-w-5xl w-full min-w-0 flex justify-between px-1">
-          <NavItem to="/drivers" label="Drivers" />
-          <NavItem to="/cleaners" label="Cleaners" />
-          <NavItem to="/app" label="DAW" />
-          <NavItem to="/movimientos" label="Historial" />
-          <NavItem to="/perfil" label="Perfil" />
-          {isSupervisor && <NavItem to="/panel" label="Panel" />}
+        <div className={cn("mx-auto max-w-5xl w-full min-w-0 grid", isSupervisor ? "grid-cols-6" : "grid-cols-5")}>
+          <NavItem to="/drivers" label="Drivers" icon={Car} />
+          <NavItem to="/cleaners" label="Cleaners" icon={Sparkles} />
+          <NavItem to="/app" label="DAW" icon={Radio} />
+          <NavItem to="/movimientos" label="Historial" icon={History} />
+          <NavItem to="/perfil" label="Perfil" icon={UserRound} />
+          {isSupervisor && <NavItem to="/panel" label="Panel" icon={LayoutDashboard} />}
         </div>
       </nav>
     </div>
@@ -119,7 +141,7 @@ function RoleBadge({ className }: { className?: string }) {
   const classes = cn(
     "inline-block text-[10px] font-bold uppercase tracking-widest border rounded px-2 py-1",
     badgeClasses[role],
-    className
+    className,
   );
   return isSupervisor ? (
     <Link to="/panel" className={classes}>
@@ -130,15 +152,18 @@ function RoleBadge({ className }: { className?: string }) {
   );
 }
 
-function NavItem({ to, label }: { to: string; label: string }) {
+function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: LucideIcon }) {
   return (
     <Link
       to={to}
       activeOptions={{ exact: true }}
-      className="flex-1 min-w-0 text-center py-2.5 px-0.5 text-[8px] sm:text-[10px] font-bold uppercase tracking-tight text-muted-foreground leading-tight break-words"
+      className="min-w-0 flex flex-col items-center justify-center gap-0.5 py-2 px-0.5 text-muted-foreground"
       activeProps={{ className: "text-primary border-t-2 border-primary" }}
     >
-      {label}
+      <Icon className="size-5 shrink-0" aria-hidden />
+      <span className="text-[9px] sm:text-[10px] font-bold uppercase leading-tight text-center truncate w-full">
+        {label}
+      </span>
     </Link>
   );
 }

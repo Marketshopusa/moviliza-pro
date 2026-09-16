@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { postAuthRedirect } from "@/lib/home-route";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -60,7 +61,7 @@ function AuthPage() {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
       }
-      navigate({ to: "/app" });
+      navigate({ to: postAuthRedirect() });
     } catch (err) {
       setError(traducir(err instanceof Error ? err.message : "Error de autenticación"));
     } finally {

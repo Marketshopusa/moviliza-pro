@@ -33,13 +33,14 @@ const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"] as const;
 
 const CARD_SYSTEM_PROMPT =
   "Eres un lector experto de tarjetas de vehículos SIXT en el aeropuerto de Orlando (MCO).\n" +
-  "La foto muestra una llave de vehículo con una etiqueta plástica negra rectangular (llavero/tag). " +
-  "IMPORTANTE: La etiqueta PUEDE ESTAR GIRADA 90° O EN CUALQUIER ÁNGULO — rota mentalmente la imagen y lee de todas formas.\n\n" +
-  "PASO 1 — LEE LA ETIQUETA NEGRA DEL LLAVERO (no es la tarjeta de terminal):\n" +
-  "   - Franja negra con letras BLANCAS GRANDES: contiene ESTADO (2 letras) + guión + PLACA. Ejemplo: 'FL – KR158B' o 'FL - BZ691Z'.\n" +
-  "     Pon el estado en plate_state y la placa en plate (sin guiones ni espacios).\n" +
-  "   - Línea debajo de la franja: marca y modelo del auto (ej: BMW SERIES 2, BMW X7, NISSAN ALTIMA). Ponlo en vehicle_model.\n" +
-  "   - Ignora íconos pequeños, combustible, transmisión, color del auto, códigos de barras y texto irrelevante.\n\n" +
+  "La foto muestra una llave grande y un llavero: carcasa/marco NEGRO con un STICKER BLANCO (o letras blancas) de texto pequeño. " +
+  "IMPORTANTE: la etiqueta PUEDE ESTAR GIRADA 90°, 180° O EN CUALQUIER ÁNGULO — rota mentalmente la imagen y lee de todas formas.\n\n" +
+  "PASO 1 — LEE SOLO LA ETIQUETA DEL LLAVERO (no el fondo de color, no la llave metálica):\n" +
+  "   - Texto tipo ESTADO (2 letras) + guión + PLACA. Ejemplos reales: 'FL – KR158B', 'FL - BZ691Z'.\n" +
+  "     plate_state = FL (u otro estado de 2 letras). plate = KR158B / BZ691Z SIN guiones ni espacios.\n" +
+  "   - Debajo: marca y modelo (BMW SERIES 2, BMW X7, VOLVO XC40). vehicle_model en mayúsculas.\n" +
+  "   - NO inventes placas. NUNCA uses ABC123 ni FL si no lo leíste. Si no se lee, usa null.\n" +
+  "   - Ignora: Gasoline, Black, Automatic, LIM, GJR, barcode, sixt.com, iconos, logos, combustible, transmisión.\n\n" +
   "PASO 2 — TERMINAL: usa el FONDO DE COLOR de referencia (tarjeta/círculo), no el tag negro.\n" +
   "   - Solo A, B o C. Base X NO se determina por foto. Nunca infieras terminal X.\n" +
   "   - BLACK / NEGRO NO ES UN COLOR DE TERMINAL. El negro puede ser el tag SIXT, un borde, impresión, sombra o fondo.\n" +
@@ -345,11 +346,13 @@ function mergeCardRead(input: {
   let plateState = str(input.parsed["plate_state"]);
   let vehicleModel = str(input.parsed["vehicle_model"]);
 
-  if (input.ocrText && (!plate || !plateState || !vehicleModel)) {
-    const plateRead = parsePlateText(input.ocrText);
+  const fallbackTexts = [input.ocrText, input.raw].filter((t): t is string => !!t);
+  for (const text of fallbackTexts) {
+    if (plate && plateState && vehicleModel) break;
+    const plateRead = parsePlateText(text);
     if (!plate && plateRead.plate) plate = plateRead.plate;
     if (!plateState && plateRead.state) plateState = plateRead.state;
-    if (!vehicleModel) vehicleModel = extractVehicleModelFromText(input.ocrText);
+    if (!vehicleModel) vehicleModel = extractVehicleModelFromText(text);
   }
 
   return {

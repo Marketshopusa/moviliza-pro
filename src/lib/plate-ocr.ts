@@ -30,8 +30,15 @@ const ALLOWED_STATE_CODES = new Set(Object.values(STATE_NAMES));
 
 export type PlateRead = { plate: string; state: string | null };
 
+const PLACEHOLDER_PLATES = new Set(["ABC123", "XYZ123", "XXXXXX", "000000"]);
+
 function isPlateToken(token: string): boolean {
-  return PLATE_RE.test(token) && /\d/.test(token) && /[A-Z]/.test(token);
+  return (
+    PLATE_RE.test(token) &&
+    /\d/.test(token) &&
+    /[A-Z]/.test(token) &&
+    !PLACEHOLDER_PLATES.has(token)
+  );
 }
 
 /**
@@ -67,6 +74,16 @@ export function parsePlateText(raw: string): PlateRead {
   if (combos.length > 0) {
     const best = [...combos].sort((a, b) => b.plate.length - a.plate.length)[0];
     if (best) return { plate: best.plate, state: best.state };
+  }
+
+  const glued = text.match(/\b([A-Z]{2})([A-Z0-9]{5,6})\b/);
+  if (
+    glued?.[1] &&
+    glued[2] &&
+    ALLOWED_STATE_CODES.has(glued[1]) &&
+    isPlateToken(glued[2])
+  ) {
+    return { plate: glued[2], state: glued[1] };
   }
 
   const stateWords = new Set(Object.keys(STATE_NAMES).flatMap((n) => n.split(" ")));

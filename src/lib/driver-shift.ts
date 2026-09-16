@@ -13,8 +13,12 @@ export type ShiftMovement = {
 
 export const ACTIVE_DRIVER_TRIP_KEY = "movilizapro_active_driver_trip";
 
+export const MOVEMENT_STATUS_EN_RUTA = "en_ruta";
+export const MOVEMENT_STATUS_CANCELADO = "cancelado";
+export const MOVEMENT_STATUS_SYNC = "sincronizado";
+
 export const CLOSE_BLOCKED_ACTIVE_TRIP =
-  "Tienes un viaje activo. Finalízalo antes de cerrar el turno.";
+  "Tienes un viaje activo. Finalízalo o cancélalo antes de cerrar el turno.";
 
 export function isOperationAllowed(shift: DriverShift | null | undefined): boolean {
   return !!shift?.id && !shift.ended_at;
@@ -29,11 +33,16 @@ export function canCloseShift(hasActiveTrip: boolean): { ok: true } | { ok: fals
   return { ok: true };
 }
 
-export function operationalMovements<T extends { shift_id: string | null }>(
+export function isCancelledMovement(status: string | null | undefined): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === MOVEMENT_STATUS_CANCELADO || value === "cancelled";
+}
+
+export function operationalMovements<T extends { shift_id: string | null; status?: string }>(
   rows: T[],
   shiftId: string,
 ): T[] {
-  return rows.filter((row) => row.shift_id === shiftId);
+  return rows.filter((row) => row.shift_id === shiftId && !isCancelledMovement(row.status));
 }
 
 export function countShiftMovements(rows: ShiftMovement[], shiftId: string) {
@@ -54,13 +63,21 @@ export function tripBelongsToActiveShift(
   movementShiftId: string | null | undefined,
   activeShiftId: string,
 ): boolean {
-  if (storedShiftId) return storedShiftId === activeShiftId;
-  if (movementShiftId) return movementShiftId === activeShiftId;
-  return false;
+  const ids = [storedShiftId, movementShiftId].filter((id): id is string => !!id);
+  if (ids.length === 0) return false;
+  return ids.every((id) => id === activeShiftId);
 }
 
 export function isActiveTripStatus(status: string | null | undefined): boolean {
-  return status === "en_ruta";
+  return status === MOVEMENT_STATUS_EN_RUTA;
+}
+
+export function movementIsLiveForShift(
+  movement: { shift_id?: string | null; status?: string | null } | null | undefined,
+  activeShiftId: string,
+): boolean {
+  if (!movement) return false;
+  return movement.shift_id === activeShiftId && isActiveTripStatus(movement.status);
 }
 
 export const DUPLICATE_OPEN_SHIFTS =

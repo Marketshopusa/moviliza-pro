@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { logBuildId, shouldShowBuildMark, BUILD_ID } from "../lib/build-id";
 
 function NotFoundComponent() {
   return (
@@ -76,8 +77,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
+      {
+        name: "viewport",
+        content:
+          "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no",
+      },
       { title: "MOVILIZA-PRO — Control de movilización de vehículos" },
+      { name: "theme-color", content: "#1e293b" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: "MOVILIZA" },
       { name: "description", content: "Registro, GPS, reportes y comunicación PTT para la movilización de vehículos de alquiler entre terminales y base." },
       { name: "author", content: "MOVILIZA-PRO" },
       { property: "og:title", content: "MOVILIZA-PRO — Control de movilización de vehículos" },
@@ -98,6 +108,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         crossOrigin: "",
       },
       { rel: "icon", href: "/favicon.png", type: "image/png" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/logo-moviliza-pro-icon.png" },
     ],
   }),
   shellComponent: RootShell,
@@ -114,6 +126,14 @@ function RootShell({ children }: { children: ReactNode }) {
       </head>
       <body>
         {children}
+        {shouldShowBuildMark() ? (
+          <div
+            id="moviliza-build-mark"
+            className="pointer-events-none fixed top-[env(safe-area-inset-top)] right-1 z-50 text-[9px] font-mono text-muted-foreground/70"
+          >
+            {BUILD_ID}
+          </div>
+        ) : null}
         <Scripts />
       </body>
     </html>
@@ -122,6 +142,9 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  useEffect(() => {
+    logBuildId();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

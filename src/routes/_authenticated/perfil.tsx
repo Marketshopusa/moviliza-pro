@@ -80,7 +80,7 @@ function PerfilPage() {
       await refreshProfile();
       setFile(null);
       setMsg("Perfil guardado.");
-      if (!profile?.avatar_url) navigate({ to: "/app" });
+      if (!profile?.avatar_url) navigate({ to: "/drivers" });
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : "No se pudo guardar el perfil");
     } finally {

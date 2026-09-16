@@ -1,23 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { readPending } from "@/lib/offline";
 import { PushToTalk } from "@/components/PushToTalk";
 import { useDriverShift } from "@/lib/driver-shift-context";
 import { countShiftMovements } from "@/lib/driver-shift";
 
-type Row = { origin: string; destination: string; shift_id: string | null };
-
-function hhmm(iso: string) {
-  return new Date(iso).toLocaleTimeString("es-US", { hour: "2-digit", minute: "2-digit" });
-}
+type Row = { origin: string; destination: string; shift_id: string | null; status?: string };
 
 export function ShiftPanel() {
   const { user } = useAuth();
   const { shift, busy, error, endShift } = useDriverShift();
   const [rows, setRows] = useState<Row[]>([]);
-  const [online, setOnline] = useState(true);
-  const [pendingCount, setPendingCount] = useState(0);
 
   const refreshRows = useCallback(async () => {
     if (!user || !shift) {
@@ -26,58 +19,41 @@ export function ShiftPanel() {
     }
     const { data: m } = await supabase
       .from("movements")
-      .select("origin, destination, shift_id")
+      .select("origin, destination, shift_id, status")
       .eq("driver_id", user.id)
       .eq("shift_id", shift.id)
       .order("occurred_at", { ascending: false })
       .limit(200);
     setRows((m as Row[]) ?? []);
-    setPendingCount(readPending().length);
   }, [user, shift]);
 
   useEffect(() => {
     void refreshRows();
-    setOnline(typeof navigator === "undefined" ? true : navigator.onLine);
-    const goOnline = () => setOnline(true);
-    const goOffline = () => setOnline(false);
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    return () => {
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
-    };
   }, [refreshRows]);
 
-  const totals = useMemo(() => (shift ? countShiftMovements(rows, shift.id) : { total: 0, toBase: 0, fromBase: 0 }), [rows, shift]);
+  const totals = useMemo(
+    () => (shift ? countShiftMovements(rows, shift.id) : { total: 0, toBase: 0, fromBase: 0 }),
+    [rows, shift],
+  );
 
   if (!shift) return null;
 
   return (
-    <div className="bg-panel rounded-xl p-4 sm:p-5 text-panel-foreground shadow-lg min-w-0 overflow-hidden">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-3 min-w-0">
-        <div className="min-w-0 overflow-hidden">
+    <div className="bg-panel rounded-xl p-4 sm:p-5 text-panel-foreground shadow-lg min-w-0">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-4 gap-3 min-w-0">
+        <div className="min-w-0">
           <PushToTalk />
         </div>
 
         <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
-          <span
-            className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${
-              online
-                ? "bg-green-500/20 text-green-500 border-green-500/40"
-                : "bg-accent/20 text-accent border-accent/30"
-            }`}
-          >
-            {online ? "En línea" : `Offline · ${pendingCount}`}
-          </span>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-green-500">En turno</span>
-          <span className="text-[10px] uppercase tracking-wider text-panel-foreground/50 text-right">
-            Desde {hhmm(shift.started_at)}
+          <span className="text-[10px] font-bold px-2 py-1 rounded border uppercase bg-green-500/20 text-green-500 border-green-500/40">
+            EN LÍNEA
           </span>
           <button
             type="button"
             disabled={busy}
             onClick={() => void endShift()}
-            className="text-sm font-bold bg-red-600 text-white px-4 py-2.5 rounded min-h-11 disabled:opacity-60"
+            className="text-sm font-bold uppercase bg-red-600 text-white px-4 py-2.5 rounded min-h-11 disabled:opacity-60"
           >
             {busy ? "Cerrando…" : "Cerrar turno"}
           </button>

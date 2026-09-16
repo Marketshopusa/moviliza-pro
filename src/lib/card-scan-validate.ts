@@ -6,7 +6,7 @@ export const REJECT_NO_TERMINAL =
   "Foto no válida. Coloca la llave sobre el color del terminal y vuelve a tomar la foto.";
 
 export const REJECT_NO_PLATE =
-  "No se leyó la placa. Coloca la llave sobre el color del terminal y vuelve a tomar la foto.";
+  "No pude leer la placa. Acerca la cámara a la etiqueta y vuelve a tomar la foto.";
 
 export type ScanTerminal = "A" | "B" | "C";
 

@@ -17,10 +17,12 @@ import { evaluateCardScan } from "@/lib/card-scan-validate";
 import { useDriverShift } from "@/lib/driver-shift-context";
 import {
   ACTIVE_DRIVER_TRIP_KEY,
+  MOVEMENT_STATUS_CANCELADO,
   canInsertDriverMovement,
+  movementIsLiveForShift,
   resolveShiftGate,
-  tripBelongsToActiveShift,
 } from "@/lib/driver-shift";
+import { scanLog } from "@/lib/scan-log";
 
 export const Route = createFileRoute("/_authenticated/drivers")({
   head: () => ({
@@ -66,31 +68,18 @@ function DriversPage() {
   const { profile, loading: authLoading } = useAuth();
   const { shift, loading, busy, error, startShift } = useDriverShift();
   const gate = resolveShiftGate(authLoading, loading, shift);
-  const [open, setOpen] = useState<Mode | null>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
-        if (raw) {
-          const trip = JSON.parse(raw);
-          if (trip.movementId && (trip.mode === "salida" || trip.mode === "retorno")) {
-            return trip.mode;
-          }
-        }
-      } catch {}
-    }
-    return "salida";
-  });
+  const [open, setOpen] = useState<Mode | null>("salida");
 
   useEffect(() => {
     if (typeof window === "undefined" || !shift) return;
     try {
       const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
       if (raw) {
-        const trip = JSON.parse(raw);
+        const trip = JSON.parse(raw) as { movementId?: string; mode?: Mode; shiftId?: string };
         if (
           trip.movementId &&
           (trip.mode === "salida" || trip.mode === "retorno") &&
-          tripBelongsToActiveShift(trip.shiftId, trip.shiftId, shift.id)
+          trip.shiftId === shift.id
         ) {
           setOpen(trip.mode);
         }
@@ -106,12 +95,14 @@ function DriversPage() {
           <p className="mt-6 text-sm text-zinc-500">Cargando…</p>
         ) : (
           <>
-            <p className="mt-3 text-sm font-bold text-red-600">Fuera de turno</p>
+            <span className="mt-3 text-[11px] font-bold uppercase tracking-widest text-white bg-red-600 px-3 py-1 rounded">
+              OFFLINE
+            </span>
             <button
               type="button"
               disabled={busy}
               onClick={() => void startShift()}
-              className="mt-6 min-h-11 px-5 py-2.5 rounded-lg bg-green-600 text-white font-bold disabled:opacity-60"
+              className="mt-8 min-h-12 px-6 py-3 rounded-lg bg-green-600 text-white font-bold uppercase tracking-wide disabled:opacity-60"
             >
               {busy ? "Iniciando…" : "Iniciar turno"}
             </button>
@@ -194,6 +185,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
   const [fotos, setFotos] = useState<string[]>([]);
   const [subiendo, setSubiendo] = useState<"ubicacion" | "llave" | null>(null);
   const [cardPhotoUrl, setCardPhotoUrl] = useState<string | null>(null);
+  const [tripHydrated, setTripHydrated] = useState(false);
 
   // Llegada a terminal: número de parqueo y pantalla de verificación
   const [spot, setSpot] = useState("");
@@ -257,73 +249,87 @@ function RutaFlow({ mode }: { mode: Mode }) {
     }
   }, [mode, position, terminal, movementId]);
 
-  // 1. Restaurar viaje activo desde localStorage y desde Supabase al montar o recargar
+  // 1. Restaurar solo un viaje en_ruta del turno activo (nunca un shift anterior).
   useEffect(() => {
-    if (!user) return;
+    if (!user || !shift) return;
     let cancelled = false;
+    setTripHydrated(false);
 
-    // A. Leer desde localStorage de inmediato (instantáneo sin esperar a la red)
-    try {
-      const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
-      if (raw) {
-        const trip = JSON.parse(raw);
-        if (
-          trip.movementId &&
-          trip.mode === mode &&
-          shift &&
-          tripBelongsToActiveShift(trip.shiftId, trip.shiftId, shift.id) &&
-          !cancelled
-        ) {
-          setMovementId(trip.movementId);
-          if (trip.plate) setPlate(trip.plate);
-          if (trip.plateState) setPlateState(trip.plateState);
-          if (trip.model) setModel(trip.model);
-          if (trip.terminal) setTerminal(trip.terminal);
-          if (trip.revisado !== undefined) setRevisado(trip.revisado);
-          if (trip.llegadaConfirmada !== undefined) setLlegadaConfirmada(trip.llegadaConfirmada);
-          if (trip.spot) setSpot(trip.spot);
-          if (trip.verifSpot) setVerifSpot(trip.verifSpot);
-          if (trip.verifTerminal) setVerifTerminal(trip.verifTerminal);
-          if (trip.servicio) setServicio(trip.servicio);
-          if (trip.fotoUbicacion) setFotoUbicacion(trip.fotoUbicacion);
-          if (trip.fotoLlave) setFotoLlave(trip.fotoLlave);
-          if (trip.fotos) setFotos(trip.fotos);
-        }
-      }
-    } catch {}
-
-    // B. Consultar Supabase para verificar si hay un viaje 'en_ruta' activo
     void (async () => {
       try {
-        if (!shift) return;
-        const { data: activeMove } = await supabase
-          .from("movements")
-          .select("*")
-          .eq("driver_id", user.id)
-          .eq("shift_id", shift.id)
-          .eq("status", "en_ruta")
-          .order("occurred_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (activeMove && !cancelled) {
-          const moveMode: Mode = activeMove.origin === "X" ? "salida" : "retorno";
-          if (moveMode === mode) {
-            setMovementId(activeMove.id);
-            if (activeMove.plate) setPlate(activeMove.plate);
-            if (activeMove.plate_state) setPlateState(activeMove.plate_state);
-            if (activeMove.vehicle_model) setModel(activeMove.vehicle_model);
-            if (moveMode === "salida" && activeMove.destination && activeMove.destination !== "X") {
-              setTerminal(activeMove.destination as Code);
-            } else if (moveMode === "retorno" && activeMove.origin && activeMove.origin !== "X") {
-              setTerminal(activeMove.origin as Code);
-            }
-            if (Array.isArray(activeMove.photos) && activeMove.photos.length > 0) {
-              setFotos(activeMove.photos.filter((p): p is string => typeof p === 'string'));
-            }
+        let candidateId: string | null = null;
+        try {
+          const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
+          if (raw) {
+            const trip = JSON.parse(raw) as { movementId?: string };
+            if (trip.movementId) candidateId = trip.movementId;
           }
+        } catch {}
+
+        type LiveMove = {
+          id: string;
+          origin: string | null;
+          destination: string | null;
+          plate: string | null;
+          plate_state: string | null;
+          vehicle_model: string | null;
+          photos: unknown;
+          shift_id: string | null;
+          status: string | null;
+        };
+        let row: LiveMove | null = null;
+        if (candidateId) {
+          const { data } = await supabase
+            .from("movements")
+            .select("id, origin, destination, plate, plate_state, vehicle_model, photos, shift_id, status")
+            .eq("id", candidateId)
+            .eq("driver_id", user.id)
+            .maybeSingle();
+          row = data as LiveMove | null;
         }
-      } catch {}
+        if (!movementIsLiveForShift(row, shift.id)) {
+          const { data: activeMove } = await supabase
+            .from("movements")
+            .select("id, origin, destination, plate, plate_state, vehicle_model, photos, shift_id, status")
+            .eq("driver_id", user.id)
+            .eq("shift_id", shift.id)
+            .eq("status", "en_ruta")
+            .order("occurred_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          row = activeMove as LiveMove | null;
+        }
+
+        if (cancelled) return;
+
+        if (!movementIsLiveForShift(row, shift.id) || !row) {
+          try {
+            localStorage.removeItem(ACTIVE_DRIVER_TRIP_KEY);
+          } catch {}
+          return;
+        }
+
+        const origin = row.origin ?? "";
+        const moveMode: Mode = origin === "X" ? "salida" : "retorno";
+        if (moveMode !== mode) return;
+
+        setMovementId(row.id);
+        if (row.plate) setPlate(row.plate);
+        if (row.plate_state) setPlateState(row.plate_state);
+        if (row.vehicle_model) setModel(row.vehicle_model);
+        if (moveMode === "salida" && row.destination && row.destination !== "X") {
+          setTerminal(row.destination as Code);
+        } else if (moveMode === "retorno" && row.origin && row.origin !== "X") {
+          setTerminal(row.origin as Code);
+        }
+        if (Array.isArray(row.photos)) {
+          setFotos(row.photos.filter((p): p is string => typeof p === "string"));
+        }
+      } catch (err) {
+        console.warn("[trip] restore", err instanceof Error ? err.message : "error");
+      } finally {
+        if (!cancelled) setTripHydrated(true);
+      }
     })();
 
     return () => {
@@ -331,14 +337,14 @@ function RutaFlow({ mode }: { mode: Mode }) {
     };
   }, [user, mode, shift]);
 
-  // 2. Persistir continuamente el viaje activo en localStorage ante cualquier cambio
+  // 2. Persistir el viaje activo solo después de hidratar y solo con el shift actual.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !tripHydrated) return;
     try {
-      if (movementId) {
+      if (movementId && shift?.id) {
         const payload = {
           movementId,
-          shiftId: shift?.id ?? null,
+          shiftId: shift.id,
           mode,
           plate,
           plateState,
@@ -355,7 +361,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
           fotos,
         };
         localStorage.setItem(ACTIVE_DRIVER_TRIP_KEY, JSON.stringify(payload));
-      } else {
+      } else if (!movementId) {
         localStorage.removeItem(ACTIVE_DRIVER_TRIP_KEY);
       }
     } catch {}
@@ -376,7 +382,51 @@ function RutaFlow({ mode }: { mode: Mode }) {
     fotoUbicacion,
     fotoLlave,
     fotos,
+    tripHydrated,
   ]);
+
+  function discardCapture() {
+    if (cardPhotoUrl) URL.revokeObjectURL(cardPhotoUrl);
+    setCardPhotoUrl(null);
+    setPlate("");
+    setPlateState("FL");
+    setModel("");
+    setTerminal(null);
+    setRevisado(false);
+    setScanMsg(null);
+    setError(null);
+    setVehPos(null);
+    setFotos([]);
+  }
+
+  async function cancelActiveTrip() {
+    if (!movementId || !user) return;
+    const ok = window.confirm("¿Cancelar este viaje? Quedará registrado como cancelado, no como completado.");
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    const { error: err } = await supabase
+      .from("movements")
+      .update({
+        status: MOVEMENT_STATUS_CANCELADO,
+        notes: `Viaje cancelado ${new Date().toISOString()}`,
+      })
+      .eq("id", movementId)
+      .eq("driver_id", user.id)
+      .eq("status", "en_ruta");
+    setBusy(false);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    try {
+      localStorage.removeItem(ACTIVE_DRIVER_TRIP_KEY);
+    } catch {}
+    setMovementId(null);
+    setLlegadaConfirmada(false);
+    discardCapture();
+    setMessage("Viaje cancelado. Puedes iniciar otro o cerrar el turno.");
+  }
 
   async function archivarFoto(rawFile: File, kind: string): Promise<string | null> {
     if (!user) return null;
@@ -411,23 +461,27 @@ function RutaFlow({ mode }: { mode: Mode }) {
     let tempUrl: string | null = null;
     try {
       tempUrl = URL.createObjectURL(rawFile);
+      scanLog("captured", { bytes: rawFile.size, type: rawFile.type });
 
       const file = await compressImage(rawFile, CARD_KEY_COMPRESSION);
       const [dataUrl, clientColor] = await Promise.all([
         fileToDataUrl(file),
         detectCardColor(file),
       ]);
+      scanLog("card color", { color: clientColor });
 
       const res = await readCard({ data: { image: dataUrl, clientColor } });
 
       let plateVal = res.plate;
       let engine = res.engine;
+      scanLog("engine", { engine });
       if (!plateVal) {
         try {
           const localPlate = await scanPlateFromImage(file);
           if (localPlate) {
             plateVal = localPlate;
             engine = "tesseract";
+            scanLog("engine", { engine, fallback: "client-tesseract" });
           }
         } catch (scanErr) {
           console.warn("[ocr] tesseract cliente", scanErr instanceof Error ? scanErr.message : "error");
@@ -441,6 +495,11 @@ function RutaFlow({ mode }: { mode: Mode }) {
         plateState: res.plate_state,
         model: res.vehicle_model,
       });
+      scanLog("state", { state: res.plate_state ?? null });
+      scanLog("plate", { plate: plateVal ?? null });
+      scanLog("model", { model: res.vehicle_model ?? null });
+      scanLog("valid", { ok: verdict.ok });
+      if (!verdict.ok) scanLog("reject reason", { reason: verdict.reason });
 
       if (!verdict.ok) {
         if (tempUrl) URL.revokeObjectURL(tempUrl);
@@ -804,9 +863,25 @@ function RutaFlow({ mode }: { mode: Mode }) {
                   {plate ? `${plateState} ${plate} ${model ? `· ${model}` : ""}` : "Revisa los datos"}
                 </span>
               </div>
+              <button
+                type="button"
+                onClick={discardCapture}
+                className="shrink-0 min-h-11 min-w-11 rounded-lg border border-red-500/40 text-red-600 text-[10px] font-bold uppercase"
+              >
+                X
+              </button>
             </div>
           )}
-          {scanMsg && <p className="text-xs text-center text-muted-foreground font-medium">{scanMsg}</p>}
+          {!movementId && (plate || terminal || cardPhotoUrl) && !scanning ? (
+            <button
+              type="button"
+              onClick={discardCapture}
+              className="w-full min-h-11 rounded-lg border border-border text-xs font-bold uppercase tracking-wide text-muted-foreground"
+            >
+              Descartar vehículo
+            </button>
+          ) : null}
+          {scanMsg && <p className="text-xs text-center text-muted-foreground font-medium break-words">{scanMsg}</p>}
 
           {/* Selección o detección de Terminal */}
           {mode === "salida" ? (
@@ -1018,6 +1093,15 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 <span>Confirmar llegada en sótano / sin GPS</span>
               </button>
             )}
+
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void cancelActiveTrip()}
+              className="w-full min-h-11 py-3 rounded-xl border border-red-500/40 text-red-600 text-xs font-bold uppercase tracking-wide disabled:opacity-60"
+            >
+              {busy ? "Cancelando…" : "Cancelar viaje"}
+            </button>
 
             {error && <p className="text-center text-xs font-bold uppercase tracking-widest text-white bg-red-600 rounded-lg p-2.5">{error}</p>}
           </div>

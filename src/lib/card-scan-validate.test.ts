@@ -86,4 +86,12 @@ const invalidPhotoDoesNotAccept = evaluateCardScan({
 });
 assertEqual("invalid scan not ok so photo not accepted", invalidPhotoDoesNotAccept.ok, false);
 
+const placeholderPlate = evaluateCardScan({
+  clientColor: "azul",
+  plate: "ABC123",
+  plateState: "FL",
+  model: "BMW SERIES 2",
+});
+assertEqual("placeholder plate rejected", placeholderPlate.ok, false);
+
 console.log("card-scan-validate tests ok");

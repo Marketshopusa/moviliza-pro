@@ -5,7 +5,14 @@ import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 
+const gitSha = (process.env["VERCEL_GIT_COMMIT_SHA"] || process.env["GITHUB_SHA"] || "local").slice(0, 12);
+const vercelEnv = process.env["VERCEL_ENV"] || "";
+
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_GIT_SHA": JSON.stringify(gitSha),
+    "import.meta.env.VITE_VERCEL_ENV": JSON.stringify(vercelEnv),
+  },
   plugins: [
     tsConfigPaths({ projects: ["./tsconfig.json"] }),
     tailwindcss(),

@@ -9,7 +9,10 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "bun src/lib/plate-ocr.test.ts && bun src/lib/card-scan-message.test.ts && bun src/lib/card-color-detector.test.ts && bun src/lib/driver-shift.test.ts && bun src/lib/card-scan-validate.test.ts",
+    "test": "bun src/lib/plate-ocr.test.ts && bun src/lib/card-scan-message.test.ts && bun src/lib/card-color-detector.test.ts && bun src/lib/driver-shift.test.ts && bun src/lib/card-scan-validate.test.ts && bun src/lib/home-route.test.ts && bun src/lib/cancel-trip.test.ts",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios",
+    "cap:sync": "cap sync",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
@@ -17,6 +20,7 @@
     "rolldown": "1.2.1"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.2",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -75,6 +79,9 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
     "@eslint/js": "^9.32.0",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
