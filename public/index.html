@@ -2,24 +2,33 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no"
-    />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <title>MOVILIZA PRO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>MOVILIZA PRO — native shell misconfigured</title>
     <style>
       body {
         font-family: system-ui, sans-serif;
         margin: 0;
         padding: 2rem 1.25rem;
-        background: #0f172a;
-        color: #e2e8f0;
+        background: #7f1d1d;
+        color: #fff7ed;
+      }
+      code {
+        background: rgb(0 0 0 / 25%);
+        padding: 0.1em 0.35em;
       }
     </style>
   </head>
   <body>
-    <p>MOVILIZA PRO — envoltorio nativo.</p>
-    <p>Este WebView debe apuntar a la app alojada (Vercel Preview) con <code>CAPACITOR_SERVER_URL</code>. No hay un segundo frontend.</p>
+    <h1>Configuración nativa incompleta</h1>
+    <p>
+      Este archivo <code>public/index.html</code> NO es MOVILIZA PRO. Es un fallback de Capacitor
+      (<code>webDir</code>) que solo aparece si falta <code>server.url</code>.
+    </p>
+    <p>
+      La app real es TanStack Start en Vercel. El WebView debe cargar
+      <code>CAPACITOR_SERVER_URL</code> (Preview HTTPS de esta rama) y luego
+      <code>bun run cap:sync</code>.
+    </p>
+    <p>No hay un segundo frontend. GEMINI_API_KEY permanece en el servidor.</p>
   </body>
 </html>
