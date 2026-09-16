@@ -7,6 +7,7 @@ import {
   canInsertDriverMovement,
   countShiftMovements,
   decideStartShift,
+  inspectOpenShifts,
   isOperationAllowed,
   operationalMovements,
   pickActiveShift,
@@ -59,6 +60,24 @@ const picked = pickActiveShift([
   { id: "open", started_at: "2026-09-14T22:00:00.000Z", ended_at: null },
 ]);
 assertEqual("pick open not closed", picked?.id, "open");
+
+const inspected = inspectOpenShifts([
+  { id: "A", started_at: "2026-09-14T18:00:00.000Z", ended_at: null },
+  { id: "B", started_at: "2026-09-14T22:00:00.000Z", ended_at: null },
+  { id: "closed", started_at: "2026-09-13T22:00:00.000Z", ended_at: "2026-09-14T02:00:00.000Z" },
+]);
+assertEqual("newest is current", inspected.current?.id, "B");
+assertEqual("old open is extra not current", inspected.extras.map((s) => s.id).join(","), "A");
+assertEqual("already ended is not extra", inspected.extras.some((s) => s.id === "closed"), false);
+const afterClosingNewest = inspectOpenShifts([
+  { id: "A", started_at: "2026-09-14T18:00:00.000Z", ended_at: null },
+  { id: "B", started_at: "2026-09-14T22:00:00.000Z", ended_at: "2026-09-15T06:30:00.000Z" },
+]);
+assertEqual("BUG: leftover open would revive if not closed", afterClosingNewest.current?.id, "A");
+assertEqual("close-all leaves none", inspectOpenShifts([
+  { id: "A", started_at: "2026-09-14T18:00:00.000Z", ended_at: "2026-09-15T06:30:00.000Z" },
+  { id: "B", started_at: "2026-09-14T22:00:00.000Z", ended_at: "2026-09-15T06:30:00.000Z" },
+]).current, null);
 
 assertEqual("ocr naranja still not X", terminalFromCardColor("naranja"), null);
 assertEqual("ocr amarillo A", terminalFromCardColor("amarillo"), "A");

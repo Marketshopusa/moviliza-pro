@@ -5,9 +5,10 @@ import { markOffShift } from "@/lib/geo";
 import {
   ACTIVE_DRIVER_TRIP_KEY,
   CLOSE_BLOCKED_ACTIVE_TRIP,
+  DUPLICATE_OPEN_SHIFTS,
   canCloseShift,
   decideStartShift,
-  pickActiveShift,
+  inspectOpenShifts,
   type DriverShift,
 } from "@/lib/driver-shift";
 
@@ -30,7 +31,7 @@ async function loadOpenShifts(driverId: string): Promise<{ shifts: DriverShift[]
     .eq("driver_id", driverId)
     .is("ended_at", null)
     .order("started_at", { ascending: false })
-    .limit(5);
+    .limit(50);
 
   if (error) return { shifts: [], error: error.message };
   return { shifts: (data as DriverShift[]) ?? [], error: null };
@@ -72,6 +73,23 @@ function clearStaleTripCache() {
   }
 }
 
+/** Cierra solo filas todavía abiertas. No toca shifts que ya tienen ended_at. */
+async function closeOpenShifts(
+  driverId: string,
+  endedAt: string,
+  exceptId?: string,
+): Promise<{ closedIds: string[]; error: string | null }> {
+  let query = supabase
+    .from("shifts")
+    .update({ ended_at: endedAt })
+    .eq("driver_id", driverId)
+    .is("ended_at", null);
+  if (exceptId) query = query.neq("id", exceptId);
+  const { data, error } = await query.select("id");
+  if (error) return { closedIds: [], error: error.message };
+  return { closedIds: ((data ?? []) as { id: string }[]).map((row) => row.id), error: null };
+}
+
 export function DriverShiftProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [shift, setShift] = useState<DriverShift | null>(null);
@@ -93,7 +111,17 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return null;
     }
-    const current = pickActiveShift(shifts);
+    const { current, extras } = inspectOpenShifts(shifts);
+    if (current && extras.length > 0) {
+      const { error: extraError } = await closeOpenShifts(user.id, new Date().toISOString(), current.id);
+      if (extraError) {
+        setError(`Turnos duplicados abiertos. Cierra el turno para regularizarlos: ${extraError}`);
+        setShift(current);
+        setLoading(false);
+        return current;
+      }
+      setError(DUPLICATE_OPEN_SHIFTS);
+    }
     setShift(current);
     setLoading(false);
     return current;
@@ -115,9 +143,24 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
         setError(loadError);
         return false;
       }
-      const existing = pickActiveShift(shifts);
-      if (decideStartShift(existing) === "use_existing" && existing) {
-        setShift(existing);
+      const inspected = inspectOpenShifts(shifts);
+      if (inspected.current && inspected.extras.length > 0) {
+        const { error: extraError } = await closeOpenShifts(
+          user.id,
+          new Date().toISOString(),
+          inspected.current.id,
+        );
+        if (extraError) {
+          setError(`Turnos duplicados abiertos. Cierra el turno para regularizarlos: ${extraError}`);
+          setShift(inspected.current);
+          return true;
+        }
+        setError(DUPLICATE_OPEN_SHIFTS);
+        setShift(inspected.current);
+        return true;
+      }
+      if (decideStartShift(inspected.current) === "use_existing" && inspected.current) {
+        setShift(inspected.current);
         return true;
       }
 
@@ -128,9 +171,12 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (insertError || !data?.id) {
-        const again = pickActiveShift((await loadOpenShifts(user.id)).shifts);
-        if (again) {
-          setShift(again);
+        const again = inspectOpenShifts((await loadOpenShifts(user.id)).shifts);
+        if (again.current) {
+          if (again.extras.length > 0) {
+            await closeOpenShifts(user.id, new Date().toISOString(), again.current.id);
+          }
+          setShift(again.current);
           return true;
         }
         setError(insertError?.message ?? "No se pudo iniciar el turno.");
@@ -139,13 +185,16 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
       }
 
       const created = data as DriverShift;
-      const confirmed = pickActiveShift((await loadOpenShifts(user.id)).shifts);
-      if (!confirmed || confirmed.id !== created.id) {
-        setError("El turno no quedó confirmado. Intenta de nuevo.");
-        setShift(confirmed);
-        return !!confirmed;
+      const confirmed = inspectOpenShifts((await loadOpenShifts(user.id)).shifts);
+      if (confirmed.extras.length > 0 && confirmed.current) {
+        await closeOpenShifts(user.id, new Date().toISOString(), confirmed.current.id);
       }
-      setShift(confirmed);
+      if (!confirmed.current || confirmed.current.id !== created.id) {
+        setError("El turno no quedó confirmado. Intenta de nuevo.");
+        setShift(confirmed.current);
+        return !!confirmed.current;
+      }
+      setShift(confirmed.current);
       return true;
     } finally {
       busyRef.current = false;
@@ -159,14 +208,14 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
     setBusy(true);
     setError(null);
     try {
-      const current = pickActiveShift((await loadOpenShifts(user.id)).shifts);
-      if (!current || current.id !== shift.id) {
+      const inspected = inspectOpenShifts((await loadOpenShifts(user.id)).shifts);
+      if (!inspected.current || inspected.current.id !== shift.id) {
         setError("No se encontró el turno activo.");
-        setShift(current);
+        setShift(inspected.current);
         return false;
       }
 
-      const activeTrip = await hasOpenTrip(user.id, current.id);
+      const activeTrip = await hasOpenTrip(user.id, inspected.current.id);
       const closeCheck = canCloseShift(activeTrip);
       if (!closeCheck.ok) {
         setError(CLOSE_BLOCKED_ACTIVE_TRIP);
@@ -174,17 +223,16 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
       }
 
       const endedAt = new Date().toISOString();
-      const { data, error: closeError } = await supabase
-        .from("shifts")
-        .update({ ended_at: endedAt })
-        .eq("id", current.id)
-        .eq("driver_id", user.id)
-        .is("ended_at", null)
-        .select("id, ended_at")
-        .maybeSingle();
+      const { error: closeError } = await closeOpenShifts(user.id, endedAt);
+      if (closeError) {
+        setError(closeError);
+        return false;
+      }
 
-      if (closeError || !data?.ended_at) {
-        setError(closeError?.message ?? "No se pudo cerrar el turno.");
+      const leftover = inspectOpenShifts((await loadOpenShifts(user.id)).shifts);
+      if (leftover.current) {
+        setError("El turno no quedó cerrado por completo. Intenta de nuevo.");
+        setShift(leftover.current);
         return false;
       }
 

@@ -63,8 +63,19 @@ export function isActiveTripStatus(status: string | null | undefined): boolean {
   return status === "en_ruta";
 }
 
+export const DUPLICATE_OPEN_SHIFTS =
+  "Había más de un turno abierto (estado inconsistente). Solo permanece el más reciente; los duplicados abiertos se cerraron. Los turnos ya finalizados no se modificaron.";
+
+export function inspectOpenShifts(rows: DriverShift[]): {
+  current: DriverShift | null;
+  extras: DriverShift[];
+} {
+  const open = rows
+    .filter((s) => !s.ended_at)
+    .sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
+  return { current: open[0] ?? null, extras: open.slice(1) };
+}
+
 export function pickActiveShift(rows: DriverShift[]): DriverShift | null {
-  const open = rows.filter((s) => !s.ended_at);
-  if (open.length === 0) return null;
-  return [...open].sort((a, b) => (a.started_at < b.started_at ? 1 : -1))[0] ?? null;
+  return inspectOpenShifts(rows).current;
 }
