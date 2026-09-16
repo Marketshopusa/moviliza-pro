@@ -48,21 +48,21 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const perfilIncompleto = !!profile && (!profile.avatar_url || !profile.initials);
 
   return (
-    <div className={cn("min-h-screen font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
-      <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border">
-        <div className="mx-auto max-w-5xl px-4 flex items-center justify-between py-2">
+    <div className={cn("min-h-dvh max-w-full overflow-x-hidden font-sans", role === "administrador" ? "bg-background-admin" : "bg-background")}>
+      <header className="sticky top-0 z-20 bg-card/90 backdrop-blur border-b border-border pt-[env(safe-area-inset-top)]">
+        <div className="mx-auto max-w-5xl w-full min-w-0 px-3 sm:px-4 flex items-center justify-between py-2 gap-2">
           <Link to="/" className="flex flex-col items-center leading-none">
             <img
               src="/logo-moviliza-pro-icon.png"
               alt="MOVILIZA-PRO"
-              className="h-12 w-auto object-contain"
+              className="h-12 w-auto max-w-16 object-contain"
               width={1024}
               height={1024}
             />
             <img
               src="/moviliza-pro-wordmark.png"
               alt="MOVILIZA-PRO"
-              className="h-4 w-auto object-contain -mt-0.5"
+              className="h-4 w-auto max-w-28 object-contain -mt-0.5"
               width={304}
               height={26}
             />
@@ -79,7 +79,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-5 pb-24 space-y-6">
+      <main className="mx-auto max-w-5xl w-full min-w-0 px-3 sm:px-4 py-5 pb-[calc(5.75rem+env(safe-area-inset-bottom))] space-y-6 overflow-x-hidden">
         {perfilIncompleto && (
           <Link
             to="/perfil"
@@ -90,8 +90,8 @@ export function AppShell({ children }: { children?: ReactNode }) {
         )}
         {children ?? <Outlet />}
       </main>
-      <nav className="fixed bottom-0 inset-x-0 z-20 bg-card border-t border-border">
-        <div className="mx-auto max-w-5xl flex justify-between px-1">
+      <nav className="fixed bottom-0 inset-x-0 z-20 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto max-w-5xl w-full min-w-0 flex justify-between px-1">
           <NavItem to="/drivers" label="Drivers" />
           <NavItem to="/cleaners" label="Cleaners" />
           <NavItem to="/app" label="DAW" />
@@ -135,7 +135,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
     <Link
       to={to}
       activeOptions={{ exact: true }}
-      className="flex-1 text-center py-2.5 px-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-tight text-muted-foreground whitespace-nowrap"
+      className="flex-1 min-w-0 text-center py-2.5 px-0.5 text-[8px] sm:text-[10px] font-bold uppercase tracking-tight text-muted-foreground leading-tight break-words"
       activeProps={{ className: "text-primary border-t-2 border-primary" }}
     >
       {label}

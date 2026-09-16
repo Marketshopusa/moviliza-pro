@@ -221,7 +221,7 @@ export function PushToTalk() {
   const visibleChannels = channels.filter((c) => !c.is_admin_only || isSupervisor);
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
       <div className="flex flex-col items-center gap-1 shrink-0">
         <button
           type="button"
@@ -252,9 +252,9 @@ export function PushToTalk() {
             handlePressEnd();
           }}
           onContextMenu={(e) => e.preventDefault()}
-          className={`size-20 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
+          className={`size-16 sm:size-20 rounded-full grid place-items-center select-none touch-none transition-all border-4 ${
             pressed || live.isTransmitting
-              ? "bg-ptt-live border-ptt-live/50 scale-110 shadow-[0_0_0_8px] shadow-ptt-live/25 animate-pulse"
+              ? "bg-ptt-live border-ptt-live/50 scale-105 shadow-[0_0_0_6px] shadow-ptt-live/25 animate-pulse"
               : `bg-ptt border-ptt/50 hover:brightness-105 active:scale-95 ${isMember ? "" : "opacity-60"}`
           }`}
         >

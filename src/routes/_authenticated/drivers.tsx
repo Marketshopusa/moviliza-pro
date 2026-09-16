@@ -12,7 +12,8 @@ import { RutaMapaLeaflet } from "@/components/RutaMapaLeaflet";
 import { VehicleSpotMap } from "@/components/VehicleSpotMap";
 import { CARD_KEY_COMPRESSION, compressImage } from "@/lib/image-compression";
 import { scanPlateFromImage } from "@/lib/plate-ocr";
-import { formatCardScanMessage, terminalFromCardColor } from "@/lib/card-scan-message";
+import { formatCardScanMessage } from "@/lib/card-scan-message";
+import { evaluateCardScan } from "@/lib/card-scan-validate";
 import { useDriverShift } from "@/lib/driver-shift-context";
 import {
   ACTIVE_DRIVER_TRIP_KEY,
@@ -127,16 +128,16 @@ function DriversPage() {
       {error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
       <ShiftPanel />
 
-      <h1 className="text-lg font-bold uppercase tracking-widest">Control de Rutas</h1>
+      <h1 className="text-lg font-bold uppercase tracking-wide sm:tracking-widest">Control de Rutas</h1>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-2 min-w-0">
         {(["salida", "retorno"] as Mode[]).map((m) => (
           <button
             key={m}
             type="button"
             onClick={() => setOpen(open === m ? null : m)}
             className={cn(
-              "py-3 rounded-lg text-sm font-bold uppercase tracking-widest border transition-all cursor-pointer",
+              "min-w-0 py-3 px-2 rounded-lg text-xs sm:text-sm font-bold uppercase tracking-wide border transition-all cursor-pointer leading-tight",
               open === m ? "bg-primary text-primary-foreground border-primary shadow" : "bg-card border-border text-muted-foreground",
             )}
           >
@@ -403,56 +404,66 @@ function RutaFlow({ mode }: { mode: Mode }) {
 
   // Escaneo de la tarjeta o placa con Google Gemini Vision oficial + fallback
   async function handleCard(rawFile: File) {
+    if (scanning) return;
     setScanning(true);
-    setScanMsg("Analizando foto con IA de visión de alta precisión…");
+    setScanMsg("Escaneando tarjeta…");
     setError(null);
+    let tempUrl: string | null = null;
     try {
-      // Previsualización inmediata en el teléfono
-      const localUrl = URL.createObjectURL(rawFile);
-      setCardPhotoUrl(localUrl);
+      tempUrl = URL.createObjectURL(rawFile);
 
       const file = await compressImage(rawFile, CARD_KEY_COMPRESSION);
-      void archivarFoto(file, "tarjeta");
       const [dataUrl, clientColor] = await Promise.all([
         fileToDataUrl(file),
         detectCardColor(file),
       ]);
 
-      const termFromColor = terminalFromCardColor(clientColor);
-      if (termFromColor && termFromColor !== "X" && (!terminal || mode === "salida")) {
-        setTerminal(termFromColor);
-      }
-
       const res = await readCard({ data: { image: dataUrl, clientColor } });
-      if (res.plate) setPlate(res.plate);
-      if (res.plate_state) setPlateState(res.plate_state);
-      if (res.vehicle_model) setModel(res.vehicle_model);
 
-      if (res.terminal && res.terminal !== "X") {
-        setTerminal(res.terminal);
-      }
-
-      let engine = res.engine;
       let plateVal = res.plate;
+      let engine = res.engine;
       if (!plateVal) {
         try {
           const localPlate = await scanPlateFromImage(file);
           if (localPlate) {
             plateVal = localPlate;
             engine = "tesseract";
-            setPlate(localPlate);
           }
         } catch (scanErr) {
           console.warn("[ocr] tesseract cliente", scanErr instanceof Error ? scanErr.message : "error");
         }
       }
 
-      let modelVal = res.vehicle_model;
-      if (plateVal && !modelVal) {
+      const verdict = evaluateCardScan({
+        clientColor,
+        aiTerminal: res.terminal,
+        plate: plateVal,
+        plateState: res.plate_state,
+        model: res.vehicle_model,
+      });
+
+      if (!verdict.ok) {
+        if (tempUrl) URL.revokeObjectURL(tempUrl);
+        setCardPhotoUrl(null);
+        setScanMsg(verdict.message);
+        setError(verdict.message);
+        return;
+      }
+
+      setTerminal(verdict.terminal);
+      setPlate(verdict.plate);
+      if (verdict.plateState) setPlateState(verdict.plateState);
+      if (verdict.model) setModel(verdict.model);
+      setCardPhotoUrl(tempUrl);
+      tempUrl = null;
+      void archivarFoto(file, "tarjeta");
+
+      let modelVal = verdict.model;
+      if (verdict.plate && !modelVal) {
         const { data: veh } = await supabase
           .from("vehicles")
           .select("vehicle_model")
-          .eq("plate", plateVal)
+          .eq("plate", verdict.plate)
           .maybeSingle();
         if (veh?.vehicle_model) {
           modelVal = veh.vehicle_model;
@@ -460,29 +471,27 @@ function RutaFlow({ mode }: { mode: Mode }) {
         }
       }
 
-      if (plateVal) {
-        try {
-          setVehPos(await fetchVehPos({ data: { plate: plateVal } }));
-        } catch (posErr) {
-          console.warn("[ocr] posición vehículo", posErr instanceof Error ? posErr.message : "error");
-          setVehPos(null);
-        }
-      } else {
+      try {
+        setVehPos(await fetchVehPos({ data: { plate: verdict.plate } }));
+      } catch (posErr) {
+        console.warn("[ocr] posición vehículo", posErr instanceof Error ? posErr.message : "error");
         setVehPos(null);
       }
 
       setScanMsg(
         formatCardScanMessage({
-          plate: plateVal,
-          plateState: res.plate_state,
+          plate: verdict.plate,
+          plateState: verdict.plateState,
           model: modelVal,
-          terminal: res.terminal,
-          cardColor: res.card_color || clientColor,
+          terminal: verdict.terminal,
+          cardColor: clientColor,
           engine,
         }),
       );
     } catch (err) {
       console.warn("[ocr] handleCard", err instanceof Error ? err.message : "error");
+      if (tempUrl) URL.revokeObjectURL(tempUrl);
+      setCardPhotoUrl(null);
       setScanMsg("No se pudo leer la foto. Verifica los datos del vehículo para iniciar.");
     } finally {
       setScanning(false);
@@ -556,6 +565,10 @@ function RutaFlow({ mode }: { mode: Mode }) {
 
   // FASE 1 -> FASE 2: Iniciar la Ruta
   async function iniciarRuta() {
+    if (scanning) {
+      setError("Espera a que termine el escaneo de la tarjeta.");
+      return;
+    }
     if (!user || !plate) {
       setError("Escanea o ingresa la placa del vehículo.");
       return;
@@ -742,9 +755,9 @@ function RutaFlow({ mode }: { mode: Mode }) {
       {/* FASE 1: INICIO DE VIAJE (Escaneo de tarjeta, vehículo y confirmación)      */}
       {/* ========================================================================= */}
       {!movementId && (
-        <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
+        <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm min-w-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground min-w-0 truncate">
               {mode === "salida" ? "Salida: Base X → Terminal" : "Retorno: Terminal → Base X"}
             </h2>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-primary/10 text-primary">
@@ -769,26 +782,26 @@ function RutaFlow({ mode }: { mode: Mode }) {
           <label
             htmlFor="driver-card-photo-input"
             className={cn(
-              "w-full py-4 rounded-xl font-bold uppercase text-xs tracking-widest shadow flex items-center justify-center gap-2 cursor-pointer select-none transition-all",
+              "w-full py-4 px-3 rounded-xl font-bold uppercase text-xs tracking-wide shadow flex items-center justify-center gap-2 cursor-pointer select-none transition-all text-center leading-tight",
               scanning
-                ? "bg-muted text-muted-foreground cursor-wait animate-pulse"
+                ? "bg-muted text-muted-foreground cursor-wait animate-pulse pointer-events-none"
                 : "bg-accent hover:bg-accent/80 active:scale-[0.99] text-accent-foreground shadow-sm",
             )}
           >
             <span>📷</span>
-            <span>{scanning ? "Analizando con IA de visión…" : "Tomar foto a la tarjeta / placa"}</span>
+            <span>{scanning ? "Escaneando tarjeta…" : "Tomar foto a la tarjeta / placa"}</span>
           </label>
-          {cardPhotoUrl && (
-            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-secondary/80 border border-border">
+          {cardPhotoUrl && !scanning && (
+            <div className="flex items-center gap-3 p-2.5 rounded-xl bg-secondary/80 border border-border min-w-0">
               <img
                 src={cardPhotoUrl}
                 alt="Foto tarjeta"
-                className="w-16 h-12 object-cover rounded-lg border border-border shadow-sm"
+                className="w-16 h-12 object-cover rounded-lg border border-border shadow-sm shrink-0"
               />
-              <div className="flex-1">
-                <span className="text-[10px] font-bold uppercase text-green-600 block">✓ Foto guardada y analizada</span>
-                <span className="text-xs font-mono font-bold text-foreground">
-                  {plate ? `${plateState} ${plate} ${model ? `· ${model}` : ""}` : "Extrayendo datos de la tarjeta…"}
+              <div className="flex-1 min-w-0">
+                <span className="text-[10px] font-bold uppercase text-green-600 block">✓ Escaneo válido</span>
+                <span className="text-xs font-mono font-bold text-foreground break-all">
+                  {plate ? `${plateState} ${plate} ${model ? `· ${model}` : ""}` : "Revisa los datos"}
                 </span>
               </div>
             </div>
@@ -808,7 +821,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
                     type="button"
                     onClick={() => setTerminal(t)}
                     className={cn(
-                      "py-3 rounded-xl font-bold uppercase text-xs tracking-widest border transition-all",
+                      "py-3 px-1 rounded-xl font-bold uppercase text-[10px] sm:text-xs tracking-wide border transition-all leading-tight",
                       terminal === t
                         ? cn(PUNTOS[t].color, PUNTOS[t].text, "border-transparent ring-2 ring-primary shadow")
                         : "bg-background text-muted-foreground border-border",
@@ -831,7 +844,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
                     type="button"
                     onClick={() => setTerminal(t)}
                     className={cn(
-                      "py-3 rounded-xl font-bold uppercase text-xs tracking-widest border transition-all",
+                      "py-3 px-1 rounded-xl font-bold uppercase text-[10px] sm:text-xs tracking-wide border transition-all leading-tight",
                       terminal === t
                         ? cn(PUNTOS[t].color, PUNTOS[t].text, "border-transparent ring-2 ring-primary shadow")
                         : "bg-background text-muted-foreground border-border",
@@ -856,7 +869,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 value={plateState}
                 onChange={(e) => setPlateState(e.target.value.toUpperCase())}
                 maxLength={2}
-                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-bold uppercase"
+                className="mt-1 w-full min-h-11 rounded-lg border border-input bg-background px-3 py-2 text-base font-bold uppercase md:text-sm"
               />
             </div>
             <div className="col-span-2">
@@ -865,7 +878,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 value={plate}
                 onChange={(e) => setPlate(e.target.value.toUpperCase())}
                 placeholder="ABC123"
-                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-bold uppercase tracking-widest"
+                className="mt-1 w-full min-h-11 rounded-lg border border-input bg-background px-3 py-2 text-base font-bold uppercase tracking-wide md:text-sm"
               />
             </div>
           </div>
@@ -876,7 +889,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder="Marca / modelo"
-              className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              className="mt-1 w-full min-h-11 rounded-lg border border-input bg-background px-3 py-2 text-base md:text-sm"
             />
           </div>
 
@@ -896,7 +909,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
           <button
             type="button"
             onClick={() => void iniciarRuta()}
-            disabled={busy}
+            disabled={busy || scanning}
             className={cn(
               "w-full py-4 rounded-xl font-bold uppercase text-xs sm:text-sm tracking-widest shadow-md transition-all cursor-pointer flex items-center justify-center gap-2",
               plate && terminal && (mode === "salida" ? revisado : true)

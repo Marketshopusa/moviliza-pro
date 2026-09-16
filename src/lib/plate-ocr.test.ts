@@ -1,4 +1,4 @@
-import { parsePlateText } from "./plate-ocr";
+import { isOperationalPlate, parsePlateText } from "./plate-ocr";
 
 function assertEqual(name: string, actual: unknown, expected: unknown) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -15,5 +15,7 @@ assertEqual("FLORIDA name", parsePlateText("FLORIDA KR158B"), { plate: "KR158B",
 assertEqual("no false toyota", parsePlateText("TOYOTA COROLLA"), { plate: "", state: null });
 assertEqual("no false bmw", parsePlateText("BMW SERIES 2"), { plate: "", state: null });
 assertEqual("reject XX code", parsePlateText("XX - KR158B"), { plate: "KR158B", state: null });
+assertEqual("operational KR158B", isOperationalPlate("KR158B"), true);
+assertEqual("not operational empty", isOperationalPlate(""), false);
 
 console.log("plate-ocr tests ok");

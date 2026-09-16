@@ -53,11 +53,13 @@ export function ShiftPanel() {
   if (!shift) return null;
 
   return (
-    <div className="bg-panel rounded-xl p-5 text-panel-foreground shadow-lg">
-      <div className="flex justify-between items-center mb-4 gap-3">
-        <PushToTalk />
+    <div className="bg-panel rounded-xl p-4 sm:p-5 text-panel-foreground shadow-lg min-w-0 overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-3 min-w-0">
+        <div className="min-w-0 overflow-hidden">
+          <PushToTalk />
+        </div>
 
-        <div className="flex flex-col items-end gap-2 shrink-0">
+        <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
           <span
             className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${
               online

@@ -79,6 +79,14 @@ export function parsePlateText(raw: string): PlateRead {
   return { plate, state: namedState };
 }
 
+export function normalizePlateToken(plate: string | null | undefined): string {
+  return (plate ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function isOperationalPlate(plate: string | null | undefined): boolean {
+  return isPlateToken(normalizePlateToken(plate));
+}
+
 type MinimalWorker = {
   recognize: (image: unknown) => Promise<{ data: { text?: string } }>;
   terminate: () => Promise<unknown>;
