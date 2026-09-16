@@ -24,6 +24,14 @@ type DriverShiftContextValue = {
 
 const DriverShiftContext = createContext<DriverShiftContextValue | null>(null);
 
+function shiftLog(message: string, extra?: Record<string, unknown>) {
+  if (extra) {
+    console.info(`[shift] ${message}`, extra);
+    return;
+  }
+  console.info(`[shift] ${message}`);
+}
+
 async function loadOpenShifts(driverId: string): Promise<{ shifts: DriverShift[]; error: string | null }> {
   const { data, error } = await supabase
     .from("shifts")
@@ -37,31 +45,32 @@ async function loadOpenShifts(driverId: string): Promise<{ shifts: DriverShift[]
   return { shifts: (data as DriverShift[]) ?? [], error: null };
 }
 
-async function hasOpenTrip(driverId: string, _shiftId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from("movements")
-    .select("id")
-    .eq("driver_id", driverId)
-    .eq("status", "en_ruta")
-    .limit(1);
-
-  if (error) throw new Error(error.message);
-  if ((data?.length ?? 0) > 0) return true;
-
+async function hasOpenTrip(driverId: string): Promise<{ active: boolean; error: string | null }> {
   try {
+    const { data, error } = await supabase
+      .from("movements")
+      .select("id")
+      .eq("driver_id", driverId)
+      .eq("status", "en_ruta")
+      .limit(1);
+
+    if (error) return { active: false, error: error.message };
+    if ((data?.length ?? 0) > 0) return { active: true, error: null };
+
     const raw = localStorage.getItem(ACTIVE_DRIVER_TRIP_KEY);
-    if (!raw) return false;
+    if (!raw) return { active: false, error: null };
     const trip = JSON.parse(raw) as { movementId?: string };
-    if (!trip.movementId) return false;
+    if (!trip.movementId) return { active: false, error: null };
     const { data: live } = await supabase
       .from("movements")
       .select("id, status")
       .eq("id", trip.movementId)
       .eq("driver_id", driverId)
       .maybeSingle();
-    return live?.status === "en_ruta";
-  } catch {
-    return false;
+    return { active: live?.status === "en_ruta", error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown";
+    return { active: false, error: message };
   }
 }
 
@@ -85,13 +94,38 @@ async function closeOpenShifts(
     .eq("driver_id", driverId)
     .is("ended_at", null);
   if (exceptId) query = query.neq("id", exceptId);
-  const { data, error } = await query.select("id");
+  const { data, error } = await query.select("id, ended_at");
   if (error) return { closedIds: [], error: error.message };
   return { closedIds: ((data ?? []) as { id: string }[]).map((row) => row.id), error: null };
 }
 
+async function closeShiftById(
+  driverId: string,
+  shiftId: string,
+  endedAt: string,
+): Promise<{ closed: boolean; error: string | null; endedAt: string | null }> {
+  const { data, error } = await supabase
+    .from("shifts")
+    .update({ ended_at: endedAt })
+    .eq("id", shiftId)
+    .eq("driver_id", driverId)
+    .is("ended_at", null)
+    .select("id, ended_at")
+    .maybeSingle();
+
+  if (error) return { closed: false, error: error.message, endedAt: null };
+  if (!data?.ended_at) {
+    return {
+      closed: false,
+      error: "Supabase no confirmó ended_at (0 filas). Revisa permisos/RLS o el id del turno.",
+      endedAt: null,
+    };
+  }
+  return { closed: true, error: null, endedAt: data.ended_at };
+}
+
 export function DriverShiftProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [shift, setShift] = useState<DriverShift | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -99,6 +133,10 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
   const busyRef = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (authLoading) {
+      setLoading(true);
+      return null;
+    }
     if (!user) {
       setShift(null);
       setLoading(false);
@@ -106,12 +144,20 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
     }
     const { shifts, error: loadError } = await loadOpenShifts(user.id);
     if (loadError) {
+      shiftLog("load open shifts failed", { error: loadError });
       setError(loadError);
       setShift(null);
       setLoading(false);
       return null;
     }
     const { current, extras } = inspectOpenShifts(shifts);
+    shiftLog("loaded open shifts", {
+      count: shifts.length,
+      activeId: current?.id ?? null,
+      startedAt: current?.started_at ?? null,
+      endedAt: current?.ended_at ?? null,
+      extraIds: extras.map((s) => s.id),
+    });
     if (current && extras.length > 0) {
       const { error: extraError } = await closeOpenShifts(user.id, new Date().toISOString(), current.id);
       if (extraError) {
@@ -125,7 +171,7 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
     setShift(current);
     setLoading(false);
     return current;
-  }, [user]);
+  }, [user, authLoading]);
 
   useEffect(() => {
     setLoading(true);
@@ -133,7 +179,7 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const startShift = useCallback(async () => {
-    if (!user || busyRef.current) return false;
+    if (authLoading || !user || busyRef.current) return false;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -194,42 +240,78 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
         setShift(confirmed.current);
         return !!confirmed.current;
       }
+      shiftLog("started", { id: confirmed.current.id, startedAt: confirmed.current.started_at });
       setShift(confirmed.current);
       return true;
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
-  }, [user]);
+  }, [user, authLoading]);
 
   const endShift = useCallback(async () => {
-    if (!user || !shift || busyRef.current) return false;
+    shiftLog("close requested", { activeId: shift?.id ?? null, startedAt: shift?.started_at ?? null });
+    if (authLoading || !user || !shift || busyRef.current) {
+      shiftLog("close aborted", {
+        authLoading,
+        hasUser: !!user,
+        hasShift: !!shift,
+        busy: busyRef.current,
+      });
+      return false;
+    }
     busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      const inspected = inspectOpenShifts((await loadOpenShifts(user.id)).shifts);
-      if (!inspected.current || inspected.current.id !== shift.id) {
-        setError("No se encontró el turno activo.");
-        setShift(inspected.current);
+      const loaded = await loadOpenShifts(user.id);
+      if (loaded.error) {
+        shiftLog("close load failed", { error: loaded.error });
+        setError(loaded.error);
         return false;
       }
+      const inspected = inspectOpenShifts(loaded.shifts);
+      const target = inspected.current?.id === shift.id ? inspected.current : inspected.current ?? shift;
+      shiftLog("active shift id", { requested: shift.id, loaded: inspected.current?.id ?? null });
 
-      const activeTrip = await hasOpenTrip(user.id, inspected.current.id);
-      const closeCheck = canCloseShift(activeTrip);
+      const trip = await hasOpenTrip(user.id);
+      if (trip.error) {
+        shiftLog("close trip check failed", { error: trip.error });
+        setError(trip.error);
+        return false;
+      }
+      const closeCheck = canCloseShift(trip.active);
       if (!closeCheck.ok) {
+        shiftLog("close blocked active trip", { shiftId: target.id });
         setError(CLOSE_BLOCKED_ACTIVE_TRIP);
         return false;
       }
 
       const endedAt = new Date().toISOString();
-      const { error: closeError } = await closeOpenShifts(user.id, endedAt);
-      if (closeError) {
-        setError(closeError);
+      const byId = await closeShiftById(user.id, target.id, endedAt);
+      shiftLog("close update result", {
+        shiftId: target.id,
+        closed: byId.closed,
+        endedAt: byId.endedAt,
+        error: byId.error,
+      });
+      if (!byId.closed) {
+        setError(byId.error ?? "No se pudo cerrar el turno.");
         return false;
       }
 
+      if (inspected.extras.length > 0) {
+        const extras = await closeOpenShifts(user.id, endedAt, target.id);
+        if (extras.error) {
+          shiftLog("close extras failed", { error: extras.error });
+        }
+      }
+
       const leftover = inspectOpenShifts((await loadOpenShifts(user.id)).shifts);
+      shiftLog("remaining open shifts", {
+        count: leftover.current ? leftover.extras.length + 1 : leftover.extras.length,
+        leftoverId: leftover.current?.id ?? null,
+      });
       if (leftover.current) {
         setError("El turno no quedó cerrado por completo. Intenta de nuevo.");
         setShift(leftover.current);
@@ -239,16 +321,22 @@ export function DriverShiftProvider({ children }: { children: ReactNode }) {
       await markOffShift(user.id).catch(() => {});
       clearStaleTripCache();
       setShift(null);
+      shiftLog("state after close", { shift: null, signedOut: false });
       return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo cerrar el turno.";
+      shiftLog("close exception", { error: message });
+      setError(message);
+      return false;
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
-  }, [user, shift]);
+  }, [user, shift, authLoading]);
 
   return (
     <DriverShiftContext.Provider
-      value={{ shift, loading, busy, error, refresh, startShift, endShift }}
+      value={{ shift, loading: authLoading || loading, busy, error, refresh, startShift, endShift }}
     >
       {children}
     </DriverShiftContext.Provider>

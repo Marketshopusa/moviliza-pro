@@ -79,3 +79,16 @@ export function inspectOpenShifts(rows: DriverShift[]): {
 export function pickActiveShift(rows: DriverShift[]): DriverShift | null {
   return inspectOpenShifts(rows).current;
 }
+
+export type ShiftGate = "loading" | "off" | "on";
+
+/** Nunca tratar loading como En turno. */
+export function resolveShiftGate(
+  authLoading: boolean,
+  shiftLoading: boolean,
+  shift: DriverShift | null | undefined,
+): ShiftGate {
+  if (authLoading || shiftLoading) return "loading";
+  if (shift?.id && !shift.ended_at) return "on";
+  return "off";
+}

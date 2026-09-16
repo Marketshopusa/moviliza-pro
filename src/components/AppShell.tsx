@@ -8,29 +8,41 @@ import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
 export function AppShell({ children }: { children?: ReactNode }) {
-  const { profile, role, isSupervisor, user } = useAuth();
+  const { profile, role, isSupervisor, user, loading: authLoading } = useAuth();
   const { shift, loading: shiftLoading } = useDriverShift();
   const [avatar, setAvatar] = useState<string | null>(null);
 
-  const beaconOn = role === "conductor" && !isSupervisor && !!shift && !shiftLoading;
+  const beaconOn = role === "conductor" && !isSupervisor && !!shift && !shiftLoading && !authLoading;
   useLocationBeacon(user?.id, beaconOn);
 
   useEffect(() => {
     let active = true;
+    if (authLoading) return;
     if (!profile?.avatar_url) {
       setAvatar(null);
       return;
     }
+    const path = profile.avatar_url;
     void supabase.storage
       .from("driver-avatars")
-      .createSignedUrl(profile.avatar_url, 3600)
-      .then(({ data }) => {
-        if (active) setAvatar(data?.signedUrl ?? null);
+      .createSignedUrl(path, 3600)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (data?.signedUrl) {
+          setAvatar(data.signedUrl);
+          return;
+        }
+        if (error) {
+          const { data: pub } = supabase.storage.from("driver-avatars").getPublicUrl(path);
+          setAvatar(pub.publicUrl || null);
+          return;
+        }
+        setAvatar(null);
       });
     return () => {
       active = false;
     };
-  }, [profile?.avatar_url]);
+  }, [profile?.avatar_url, authLoading]);
 
 
   const perfilIncompleto = !!profile && (!profile.avatar_url || !profile.initials);
@@ -59,7 +71,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             <Link to="/perfil" className="size-14 rounded-xl overflow-hidden bg-panel text-panel-foreground grid place-items-center text-sm font-mono font-bold shadow-sm">
               {avatar ? (
                 <img src={avatar} alt={`Foto de perfil de ${profile?.full_name ?? "conductor"}`} className="size-full object-cover" />
-              ) : (
+              ) : authLoading ? null : (
                 (profile?.initials ?? "?")
               )}
             </Link>

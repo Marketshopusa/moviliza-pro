@@ -17,6 +17,7 @@ import { useDriverShift } from "@/lib/driver-shift-context";
 import {
   ACTIVE_DRIVER_TRIP_KEY,
   canInsertDriverMovement,
+  resolveShiftGate,
   tripBelongsToActiveShift,
 } from "@/lib/driver-shift";
 
@@ -61,9 +62,9 @@ function distanciaM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 }
 
 function DriversPage() {
-  const { role, isSupervisor, profile } = useAuth();
+  const { profile, loading: authLoading } = useAuth();
   const { shift, loading, busy, error, startShift } = useDriverShift();
-  const gateShift = role === "conductor" && !isSupervisor;
+  const gate = resolveShiftGate(authLoading, loading, shift);
   const [open, setOpen] = useState<Mode | null>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -96,22 +97,24 @@ function DriversPage() {
     } catch {}
   }, [shift]);
 
-  if (gateShift && (loading || !shift)) {
+  if (gate !== "on") {
     return (
       <div className="bg-white rounded-xl min-h-[70vh] px-4 py-8 flex flex-col items-center text-center">
-        <p className="text-base font-semibold text-zinc-900">{profile?.full_name ?? "Driver"}</p>
-        <p className="mt-3 text-sm font-bold text-red-600">Fuera de turno</p>
-        {loading ? (
-          <p className="mt-6 text-sm text-zinc-500">Comprobando turno…</p>
+        <p className="text-base font-semibold text-zinc-900">{profile?.full_name ?? (gate === "loading" ? "" : "Driver")}</p>
+        {gate === "loading" ? (
+          <p className="mt-6 text-sm text-zinc-500">Cargando…</p>
         ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void startShift()}
-            className="mt-6 min-h-11 px-5 py-2.5 rounded-lg bg-green-600 text-white font-bold disabled:opacity-60"
-          >
-            {busy ? "Iniciando…" : "Iniciar turno"}
-          </button>
+          <>
+            <p className="mt-3 text-sm font-bold text-red-600">Fuera de turno</p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void startShift()}
+              className="mt-6 min-h-11 px-5 py-2.5 rounded-lg bg-green-600 text-white font-bold disabled:opacity-60"
+            >
+              {busy ? "Iniciando…" : "Iniciar turno"}
+            </button>
+          </>
         )}
         {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
       </div>
@@ -120,6 +123,8 @@ function DriversPage() {
 
   return (
     <div className="space-y-4">
+      <p className="text-sm font-semibold text-zinc-900">{profile?.full_name}</p>
+      {error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
       <ShiftPanel />
 
       <h1 className="text-lg font-bold uppercase tracking-widest">Control de Rutas</h1>

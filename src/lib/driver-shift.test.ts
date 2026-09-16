@@ -11,6 +11,7 @@ import {
   isOperationAllowed,
   operationalMovements,
   pickActiveShift,
+  resolveShiftGate,
   tripBelongsToActiveShift,
 } from "./driver-shift";
 
@@ -87,6 +88,13 @@ assertEqual("ocr negro none", terminalFromCardColor("negro"), null);
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const shiftPanel = readFileSync(join(dir, "../components/ShiftPanel.tsx"), "utf8");
+assertEqual("gate loading auth", resolveShiftGate(true, false, shift), "loading");
+assertEqual("gate loading shift", resolveShiftGate(false, true, shift), "loading");
+assertEqual("gate loading not on even with shift", resolveShiftGate(true, true, shift), "loading");
+assertEqual("gate on", resolveShiftGate(false, false, shift), "on");
+assertEqual("gate off", resolveShiftGate(false, false, null), "off");
+assertEqual("no Buscar turno in drivers", readFileSync(join(dir, "../routes/_authenticated/drivers.tsx"), "utf8").includes("Buscar turno"), false);
+assertEqual("no Buscar turno in shift panel", shiftPanel.includes("Buscar turno"), false);
 if (shiftPanel.includes("signOut")) {
   throw new Error("ShiftPanel must not sign out on close");
 }
