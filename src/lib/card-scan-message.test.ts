@@ -10,10 +10,14 @@ function assertEqual(name: string, actual: unknown, expected: unknown) {
   }
 }
 
+assertEqual("naranja X", terminalFromCardColor("naranja"), "X");
 assertEqual("amarillo A", terminalFromCardColor("amarillo"), "A");
 assertEqual("verde B", terminalFromCardColor("verde"), "B");
 assertEqual("azul C", terminalFromCardColor("azul"), "C");
-assertEqual("negro not X", terminalFromCardColor("negro"), null);
+assertEqual("negro !X", terminalFromCardColor("negro"), null);
+assertEqual("negro !A", terminalFromCardColor("negro"), null);
+assertEqual("negro !B", terminalFromCardColor("negro") === "B", false);
+assertEqual("negro !C", terminalFromCardColor("negro") === "C", false);
 assertEqual("parse C", parseAiTerminal("C"), "C");
 assertEqual("parse X", parseAiTerminal("X"), "X");
 assertEqual("parse junk", parseAiTerminal("term"), null);
@@ -28,6 +32,30 @@ const colorOnly = formatCardScanMessage({
 });
 if (!colorOnly.includes("Color de tarjeta") || colorOnly.includes("OCR IA")) {
   throw new Error(`color-only must not claim IA: ${colorOnly}`);
+}
+
+const orangeMsg = formatCardScanMessage({
+  plate: null,
+  plateState: null,
+  model: null,
+  terminal: null,
+  cardColor: "naranja",
+  engine: "none",
+});
+if (!orangeMsg.includes("Base X") || orangeMsg.includes("OCR IA")) {
+  throw new Error(`naranja should mention Base X without IA: ${orangeMsg}`);
+}
+
+const blackMsg = formatCardScanMessage({
+  plate: "KR158B",
+  plateState: "FL",
+  model: null,
+  terminal: null,
+  cardColor: "negro",
+  engine: "gemini",
+});
+if (blackMsg.includes("Base X")) {
+  throw new Error(`negro must not produce Base X: ${blackMsg}`);
 }
 
 const ia = formatCardScanMessage({

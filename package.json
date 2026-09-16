@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "bun src/lib/plate-ocr.test.ts && bun src/lib/card-scan-message.test.ts",
+    "test": "bun src/lib/plate-ocr.test.ts && bun src/lib/card-scan-message.test.ts && bun src/lib/card-color-detector.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

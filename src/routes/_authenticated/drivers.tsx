@@ -34,7 +34,7 @@ type Punto = { code: Code; label: string; lat: number; lng: number; color: strin
 
 /** Puntos operativos reales (áreas de renta SIXT del aeropuerto y base). */
 const PUNTOS: Record<Code, Punto> = {
-  X: { code: "X", label: "Base X", lat: 28.4506186, lng: -81.3183711, color: "bg-black", text: "text-white", ring: "ring-gray-500", line: "#111827" },
+  X: { code: "X", label: "Base X", lat: 28.4506186, lng: -81.3183711, color: "bg-orange-500", text: "text-white", ring: "ring-orange-300", line: "#f97316" },
   A: { code: "A", label: "Terminal A", lat: 28.4336994, lng: -81.3106776, color: "bg-yellow-400", text: "text-yellow-900", ring: "ring-yellow-300", line: "#facc15" },
   B: { code: "B", label: "Terminal B", lat: 28.4287389, lng: -81.3082106, color: "bg-green-500", text: "text-white", ring: "ring-green-300", line: "#22c55e" },
   C: { code: "C", label: "Terminal C", lat: 28.4130398, lng: -81.3093816, color: "bg-blue-500", text: "text-white", ring: "ring-blue-300", line: "#3b82f6" },
@@ -787,7 +787,7 @@ function RutaFlow({ mode }: { mode: Mode }) {
                 ))}
               </div>
               <div className="flex items-center justify-center gap-2 pt-1 text-muted-foreground">
-                <span className="size-6 rounded-full flex items-center justify-center text-xs font-bold bg-black text-white">X</span>
+                <span className="size-6 rounded-full flex items-center justify-center text-xs font-bold bg-orange-500 text-white">X</span>
                 <span className="text-[10px] font-bold uppercase tracking-wider">Destino obligatorio: Base X</span>
               </div>
             </div>

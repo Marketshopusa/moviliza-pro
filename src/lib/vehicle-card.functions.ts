@@ -12,8 +12,8 @@ export type CardRead = {
   plate_state: string | null;
   plate: string | null;
   vehicle_model: string | null;
-  /** Color de fondo detectado en la tarjeta: amarillo, verde, azul o negro. */
-  card_color: "amarillo" | "verde" | "azul" | "negro" | null;
+  /** Color de fondo de la tarjeta de referencia: naranja, amarillo, verde, azul (negro no es ubicación). */
+  card_color: "naranja" | "amarillo" | "verde" | "azul" | "negro" | null;
   /** Terminal deducido del color: A, B, C o X. */
   terminal: "A" | "B" | "C" | "X" | null;
   engine: CardOcrEngine;
@@ -40,12 +40,12 @@ const CARD_SYSTEM_PROMPT =
   "     Pon el estado en plate_state y la placa en plate (sin guiones ni espacios).\n" +
   "   - Línea debajo de la franja: marca y modelo del auto (ej: BMW SERIES 2, BMW X7, NISSAN ALTIMA). Ponlo en vehicle_model.\n" +
   "   - Ignora íconos pequeños, combustible, transmisión, color del auto, códigos de barras y texto irrelevante.\n\n" +
-  "PASO 2 — TERMINAL: usa la TARJETA DE COLOR debajo o alrededor de la llave, no el tag negro.\n" +
-  "   - El llavero/tag negro NUNCA es Base X por ser negro.\n" +
-  "   - Fondo AMARILLO o texto Terminal A → terminal: A, card_color: amarillo\n" +
-  "   - Fondo VERDE o texto Terminal B → terminal: B, card_color: verde\n" +
-  "   - Fondo AZUL o texto Terminal C → terminal: C, card_color: azul\n" +
-  "   - Solo si el FONDO de la tarjeta (no el tag) es negro o el texto dice Base X → terminal: X, card_color: negro\n\n" +
+  "PASO 2 — TERMINAL: usa la TARJETA O CÍRCULO DE COLOR de referencia, no el tag negro.\n" +
+  "   - BLACK / NEGRO NO ES UN COLOR DE TERMINAL. El negro puede ser el tag SIXT, un borde, impresión, sombra o fondo. Nunca infieras X, A, B ni C solo porque haya negro.\n" +
+  "   - Fondo NARANJA / ORANGE o texto Base X → terminal: X, card_color: naranja\n" +
+  "   - Fondo AMARILLO / YELLOW o texto Terminal A → terminal: A, card_color: amarillo\n" +
+  "   - Fondo VERDE / GREEN o texto Terminal B → terminal: B, card_color: verde\n" +
+  "   - Fondo AZUL / BLUE o texto Terminal C → terminal: C, card_color: azul\n\n" +
   "Responde ÚNICAMENTE con JSON válido, sin markdown:\n" +
   '{"plate_state":"FL","plate":"KR158B","vehicle_model":"BMW SERIES 2","card_color":"azul","terminal":"C"}\n' +
   "Si no puedes leer un campo con certeza, usa null para ese campo.";
@@ -59,14 +59,15 @@ const SPOT_SYSTEM_PROMPT =
 
 function buildCardPrompt(clientColor?: CardColor | undefined): string {
   let hint = "";
-  if (clientColor === "amarillo" || clientColor === "verde" || clientColor === "azul") {
+  if (
+    clientColor === "naranja" ||
+    clientColor === "amarillo" ||
+    clientColor === "verde" ||
+    clientColor === "azul"
+  ) {
     hint =
-      `\nPista del detector de márgenes (tarjeta, no el tag): card_color aparente "${clientColor}". ` +
-      "Confírmalo mirando el fondo de color, no el llavero negro.";
-  } else if (clientColor === "negro") {
-    hint =
-      "\nPista del detector de márgenes: hay oscuro en el borde. Puede ser tarjeta Base X. " +
-      "No uses el tag negro como Base X.";
+      `\nPista del detector Canvas (tarjeta de color, no el tag): card_color aparente "${clientColor}". ` +
+      "Confírmalo mirando el fondo de color. BLACK/NEGRO no es un terminal.";
   }
   return CARD_SYSTEM_PROMPT + hint;
 }
@@ -298,10 +299,18 @@ function extractVehicleModelFromText(text: string): string | null {
 
 function parseCardColor(rawColor: string | null | undefined): CardRead["card_color"] {
   const val = (rawColor ?? "").toLowerCase();
+  if (val.includes("naranj") || val.includes("orange")) return "naranja";
   if (val.includes("amarill") || val.includes("yellow")) return "amarillo";
   if (val.includes("verd") || val.includes("green")) return "verde";
   if (val.includes("azul") || val.includes("blue")) return "azul";
   if (val.includes("negr") || val.includes("black")) return "negro";
+  return null;
+}
+
+function operationalClientColor(color: CardColor | undefined): CardColor {
+  if (color === "naranja" || color === "amarillo" || color === "verde" || color === "azul") {
+    return color;
+  }
   return null;
 }
 
@@ -325,15 +334,13 @@ function mergeCardRead(input: {
   ocrText?: string;
 }): CardRead {
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null);
-  const aiColor = parseCardColor(str(input.parsed["card_color"]));
-  const chromaticClient =
-    input.clientColor === "amarillo" ||
-    input.clientColor === "verde" ||
-    input.clientColor === "azul"
-      ? input.clientColor
-      : null;
-  const finalColor = aiColor || chromaticClient || input.clientColor || null;
-  const aiTerminal = parseAiTerminal(input.parsed["terminal"]);
+  const parsedColor = parseCardColor(str(input.parsed["card_color"]));
+  const clientOp = operationalClientColor(input.clientColor);
+  const finalColor = (parsedColor && parsedColor !== "negro" ? parsedColor : null) || clientOp || null;
+  let aiTerminal = parseAiTerminal(input.parsed["terminal"]);
+  if (aiTerminal === "X" && parsedColor === "negro") {
+    aiTerminal = null;
+  }
   const terminal = aiTerminal ?? terminalFromCardColor(finalColor);
 
   let plate = str(input.parsed["plate"])?.replace(/[^A-Z0-9]/g, "") ?? null;
@@ -398,13 +405,7 @@ export async function processVehicleCard(data: {
   const ocrText = await callLocalOCR(data.image);
   const plateRead = parsePlateText(ocrText);
   const model = extractVehicleModelFromText(ocrText);
-  const chromaticClient =
-    data.clientColor === "amarillo" ||
-    data.clientColor === "verde" ||
-    data.clientColor === "azul"
-      ? data.clientColor
-      : null;
-  const finalColor = chromaticClient || data.clientColor || null;
+  const finalColor = operationalClientColor(data.clientColor);
 
   return {
     plate_state: plateRead.state,
@@ -467,7 +468,7 @@ export const readVehicleCard = createServerFn({ method: "POST" })
     z
       .object({
         image: z.string().min(20),
-        clientColor: z.enum(["amarillo", "verde", "azul", "negro"]).nullable().optional(),
+        clientColor: z.enum(["naranja", "amarillo", "verde", "azul", "negro"]).nullable().optional(),
       })
       .parse(data),
   )

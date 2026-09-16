@@ -3,10 +3,11 @@ import type { CardColor } from "@/lib/card-color-detector";
 export type CardOcrEngine = "gemini" | "openai" | "tesseract" | "none";
 
 export function terminalFromCardColor(color: CardColor): "A" | "B" | "C" | "X" | null {
+  if (color === "naranja") return "X";
   if (color === "amarillo") return "A";
   if (color === "verde") return "B";
   if (color === "azul") return "C";
-  // El negro del tag SIXT no se traduce a Base X; eso solo lo confirma Gemini/texto.
+  // Negro (tag, bordes, sombras) no es un punto operativo.
   return null;
 }
 
